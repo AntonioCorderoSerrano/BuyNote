@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { db, auth } from "../firebase";
-import { collection, addDoc, query, where, onSnapshot, deleteDoc, doc, writeBatch, getDocs, updateDoc, arrayUnion, arrayRemove, getDoc } from "firebase/firestore";
+import { collection, addDoc, query, where, onSnapshot, deleteDoc, writeBatch, getDocs, arrayUnion, arrayRemove, getDoc } from "firebase/firestore";
+import { doc, updateDoc } from "firebase/firestore";
 import { signOut } from "firebase/auth";
 import { onAuthStateChanged } from "firebase/auth";
 
@@ -275,10 +276,11 @@ export function ShoppingList() {
   const deleteItem = async (id) => {
     try {
       setLoading(true);
-      await deleteDoc(doc(db, "items", id));
+      await deleteDoc(doc(db, "items", id)); // ✅ Esto ya está bien
       setConfirmDelete(null);
     } catch (err) {
-      console.log(err.message);
+      console.error("Error borrando ítem:", err);
+      alert("No tienes permiso para borrar este ítem"); // Mensaje útil
     } finally {
       setLoading(false);
     }
@@ -403,27 +405,26 @@ export function ShoppingList() {
   };
 
   const toggleItemCompletion = async (itemId, currentStatus) => {
+    if (!itemId || typeof itemId !== "string") {
+      console.error("ID de ítem no válido:", itemId);
+      return;
+    }
+
     try {
-      // Optimistic UI: Actualizar estado localmente primero
+      // Optimistic UI update
       setItems(prev => prev.map(item =>
-        item.id === itemId
-          ? { ...item, completed: !currentStatus }
-          : item
+        item.id === itemId ? { ...item, completed: !currentStatus } : item
       ));
 
-      // Operación real en Firebase
-      await updateDoc(doc(db, "items", itemId), {
-        completed: !currentStatus,
-      });
+      // Construye la referencia correctamente
+      const itemRef = doc(db, "items", itemId);
+      await updateDoc(itemRef, { completed: !currentStatus });
     } catch (err) {
       console.error("Error actualizando item:", err);
-      // Revertir cambios si falla
+      // Revertir cambios
       setItems(prev => prev.map(item =>
-        item.id === itemId
-          ? { ...item, completed: currentStatus }
-          : item
+        item.id === itemId ? { ...item, completed: currentStatus } : item
       ));
-      setError(`Error actualizando item: ${err.message}`);
     }
   };
 
@@ -449,63 +450,6 @@ export function ShoppingList() {
     </div>
   );
 
-  // Renderizado condicional del input de items
-  const renderItemInput = () => {
-    if (!currentList) return null;
-    
-    return (
-      <div className="items-section">
-        <h3>Ítems</h3>
-        <div className="item-input">
-          <input
-            value={newItem}
-            onChange={(e) => setNewItem(e.target.value)}
-            placeholder="Nuevo ítem"
-            className="elegant-input"
-            onKeyPress={(e) => e.key === 'Enter' && addItem()}
-          />
-          <button
-            onClick={addItem}
-            disabled={!newItem.trim()}
-            className="add-button"
-          >
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <path d="M12 4V20M4 12H20" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-          </button>
-        </div>
-
-        <ul className="items-list">
-          {sortedItems.map(item => (
-            <li key={`item-${item.id}`} className={`item-card ${item.completed ? 'completed' : ''}`}>
-              <div className="item-content">
-                <input
-                  type="checkbox"
-                  checked={item.completed}
-                  onChange={(e) => toggleItemCompletion(item.id, item.completed)}
-                  className="item-checkbox"
-                />
-                <span className={`item-text ${item.completed ? 'strikethrough' : ''}`}>
-                  {item.text}
-                </span>
-              </div>
-              {/* Mostrar botón de eliminar para todos los usuarios en listas compartidas */}
-              {(isCurrentListShared() || isCurrentListOwner()) && (
-                <button
-                  onClick={() => setConfirmDelete(item)}
-                  className="delete-item-btn"
-                >
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                    <path d="M19 7L18.1327 19.1425C18.0579 20.1891 17.187 21 16.1378 21H7.86224C6.81296 21 5.94208 20.1891 5.86732 19.1425L5 7M10 11V17M14 11V17M15 7V4C15 3.44772 14.5523 3 14 3H10C9.44772 3 9 3.44772 9 4V7M4 7H20" stroke="#c62828" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                  </svg>
-                </button>
-              )}
-            </li>
-          ))}
-        </ul>
-      </div>
-    );
-  };
 
   return (
     <div className="app-container">
@@ -563,11 +507,19 @@ export function ShoppingList() {
                   disabled={loading}
                   className="elegant-select"
                 >
+                  {/* Opción predeterminada */}
+                  <option value="" disabled hidden>
+                    Selecciona una lista para ver sus productos
+                  </option>
+
                   <optgroup label="Mis listas">
                     {lists.map((list, index) => (
-                      <option key={`my-${list.id || index}`} value={list.id}>{list.name}</option>
+                      <option key={`my-${list.id || index}`} value={list.id}>
+                        {list.name}
+                      </option>
                     ))}
                   </optgroup>
+
                   {sharedLists.length > 0 && (
                     <optgroup label="Listas compartidas conmigo">
                       {sharedLists.map((list, index) => (
@@ -686,12 +638,12 @@ export function ShoppingList() {
 
           {currentList && (
             <div className="items-section">
-              <h3>Ítems</h3>
+              <h3>Productos</h3>
               <div className="item-input">
                 <input
                   value={newItem}
                   onChange={(e) => setNewItem(e.target.value)}
-                  placeholder="Nuevo ítem"
+                  placeholder="Nuevo producto"
                   disabled={loading}
                   className="elegant-input"
                   onKeyPress={(e) => e.key === 'Enter' && addItem()}
@@ -768,7 +720,7 @@ export function ShoppingList() {
       {confirmListDelete && (
         <div className="modal-overlay" >
           <div className="confirmation-modal" style={{ backgroundColor: "white" }}>
-            <p>¿Eliminar la lista "{confirmListDelete.name}" y todos sus ítems?</p>
+            <p>¿Eliminar la lista "{confirmListDelete.name}" y todos sus productos?</p>
             <div className="modal-buttons">
               <button
                 onClick={() => setConfirmListDelete(null)}
