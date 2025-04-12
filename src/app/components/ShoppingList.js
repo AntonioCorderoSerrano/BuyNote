@@ -1,7 +1,8 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { db, auth } from "../firebase";
-import { collection, addDoc, query, where, onSnapshot, deleteDoc, doc, writeBatch, getDocs, updateDoc, arrayUnion, arrayRemove } from "firebase/firestore";
+import { collection, addDoc, query, where, onSnapshot, deleteDoc, doc, writeBatch, getDocs, updateDoc, arrayUnion, arrayRemove, getDoc } from "firebase/firestore";
 import { signOut } from "firebase/auth";
+import { onAuthStateChanged } from "firebase/auth";
 
 export function ShoppingList() {
   const [items, setItems] = useState([]);
@@ -19,116 +20,255 @@ export function ShoppingList() {
   const [sharedUsers, setSharedUsers] = useState([]);
   const [unshareDialogOpen, setUnshareDialogOpen] = useState(false);
   const [userToUnshare, setUserToUnshare] = useState("");
+  const [userReady, setUserReady] = useState(false);
+
+  // Referencias para mantener datos entre renders sin recargar
+  const itemsCache = useRef({});
+  const listsCache = useRef({ userLists: [], sharedLists: [] });
 
   useEffect(() => {
-    if (!auth.currentUser) return;
+    const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
+      if (user) {
+        setUserReady(true);
+        loadInitialData(user);
+      } else {
+        setUserReady(false);
+        resetState();
+      }
+    });
 
-    setLoading(true);
+    return () => unsubscribeAuth();
+  }, []);
 
+  const resetState = () => {
+    setItems([]);
+    setLists([]);
+    setSharedLists([]);
+    setCurrentList("");
+    itemsCache.current = {};
+    listsCache.current = { userLists: [], sharedLists: [] };
+  };
+
+  const loadInitialData = async (user) => {
+    try {
+      setLoading(true);
+
+      // Inicializar cachés si están vacías
+      if (!listsCache.current.userLists.length) {
+        listsCache.current.userLists = [];
+      }
+      if (!listsCache.current.sharedLists.length) {
+        listsCache.current.sharedLists = [];
+      }
+
+      const [userUnsubscribe, sharedUnsubscribe] = await Promise.all([
+        loadUserLists(user),
+        loadSharedLists(user)
+      ]);
+
+      // Usar los datos del cache para establecer el estado inicial
+      const allLists = [
+        ...listsCache.current.userLists,
+        ...listsCache.current.sharedLists
+      ];
+
+      if (allLists.length > 0 && !currentList) {
+        setCurrentList(allLists[0].id);
+      }
+
+      return () => {
+        userUnsubscribe();
+        sharedUnsubscribe();
+      };
+    } catch (err) {
+      console.error("Error loading initial data:", err);
+      setError(`Error loading data: ${err.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadUserLists = async (user) => {
     const userListsQuery = query(
       collection(db, "lists"),
-      where("userId", "==", auth.currentUser.uid)
+      where("userId", "==", user.uid)
     );
 
+    const unsubscribe = onSnapshot(userListsQuery, (snapshot) => {
+      const userLists = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+
+      // Actualizar cache primero
+      listsCache.current.userLists = userLists;
+
+      // Luego actualizar estado
+      setLists(userLists);
+    });
+
+    return unsubscribe;
+  };
+
+  const loadSharedLists = async (user) => {
     const sharedListsQuery = query(
       collection(db, "lists"),
-      where("sharedWith", "array-contains", auth.currentUser.email)
+      where("sharedWith", "array-contains", user.email)
     );
 
-    const unsubscribeUserLists = onSnapshot(userListsQuery,
-      (snapshot) => {
-        const userLists = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-        setLists(userLists);
+    const unsubscribe = onSnapshot(sharedListsQuery, (snapshot) => {
+      const sharedListsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
 
-        if (userLists.length > 0 && !currentList) {
-          setCurrentList(userLists[0].id);
-        }
-      },
-      (err) => {
-        setError(err.message);
-      }
-    );
+      // Actualizar cache primero
+      listsCache.current.sharedLists = sharedListsData;
 
-    const unsubscribeSharedLists = onSnapshot(sharedListsQuery,
-      (snapshot) => {
-        const sharedListsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-        setSharedLists(sharedListsData);
-      },
-      (err) => {
-        setError(err.message);
-      }
-    );
+      // Luego actualizar estado
+      setSharedLists(sharedListsData);
+    });
 
-    setLoading(false);
+    return unsubscribe;
+  };
 
-    return () => {
-      unsubscribeUserLists();
-      unsubscribeSharedLists();
-    };
-  }, [auth.currentUser]);
-
+  // Efecto optimizado para items con cache local
   useEffect(() => {
     if (!currentList) {
       setItems([]);
       return;
     }
 
-    setLoading(true);
     const q = query(
       collection(db, "items"),
       where("listId", "==", currentList)
     );
 
-    const unsubscribe = onSnapshot(q,
-      (snapshot) => {
-        setItems(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-        setLoading(false);
-      },
-      (err) => {
-        setError(err.message);
-        setLoading(false);
-      }
-    );
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const updatedItems = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+
+      // Actualizar cache primero para evitar parpadeos
+      itemsCache.current = {
+        ...itemsCache.current,
+        [currentList]: updatedItems
+      };
+
+      // Usar setTimeout para dar tiempo al renderizado
+      setTimeout(() => {
+        setItems(updatedItems);
+      }, 50);
+    });
+
+    // Cargar items desde cache si existen
+    if (itemsCache.current[currentList]) {
+      setItems(itemsCache.current[currentList]);
+    }
 
     return unsubscribe;
   }, [currentList]);
 
+  // Funciones optimizadas con delays para mejor UX
   const createList = async () => {
-    if (!auth.currentUser || !newListName.trim()) return;
+    if (!auth.currentUser?.uid || !newListName.trim()) return;
 
     try {
-      setLoading(true);
-      await addDoc(collection(db, "lists"), {
+      // 1. Crear lista temporal optimista
+      const tempId = `temp-${Date.now()}`;
+      const tempList = {
+        id: tempId,
+        name: newListName,
+        userId: auth.currentUser.uid,
+        sharedWith: [],
+        createdAt: new Date(),
+        isOptimistic: true // Marcar como temporal
+      };
+
+      // Actualizar estado inmediatamente (Optimistic UI)
+      setLists(prev => [...prev, tempList]);
+      setCurrentList(tempId);
+      setNewListName("");
+
+      // 2. Crear la lista en Firebase (en segundo plano)
+      const docRef = await addDoc(collection(db, "lists"), {
         name: newListName,
         userId: auth.currentUser.uid,
         sharedWith: [],
         createdAt: new Date()
       });
-      setNewListName("");
+
+      // 3. Reemplazar la lista temporal con la real
+      setLists(prev =>
+        prev.map(list =>
+          list.id === tempId
+            ? { ...list, id: docRef.id, isOptimistic: false }
+            : list
+        )
+      );
+
+      setCurrentList(docRef.id);
+
     } catch (err) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
+      console.error("Error creando lista:", err);
+
+      // Revertir cambios si falla
+      setLists(prev => prev.filter(list => list.id !== tempId));
+
+      // Si estábamos mostrando esta lista temporal, volver a la anterior
+      if (currentList === tempId) {
+        setCurrentList(lists[0]?.id || "");
+      }
+
+      setError(`Error al crear lista: ${err.message}`);
     }
   };
 
+  // En el renderizado del select de listas:
+  <select
+    value={currentList}
+    onChange={(e) => setCurrentList(e.target.value)}
+    className="elegant-select"
+  >
+    <optgroup label="Mis listas">
+      {lists.map((list) => (
+        <option
+          key={list.id}
+          value={list.id}
+          className={list.isOptimistic ? "optimistic-item" : ""}
+        >
+          {list.name} {list.isOptimistic && "(Guardando...)"}
+        </option>
+      ))}
+    </optgroup>
+  </select>
+
+
   const addItem = async () => {
-    if (!auth.currentUser || !currentList || !newItem.trim()) return;
+    if (!userReady || !auth.currentUser?.uid || !currentList || !newItem.trim()) return;
 
     try {
-      setLoading(true);
-      await addDoc(collection(db, "items"), {
+      // Optimistic UI update
+      const tempId = `temp-item-${Date.now()}`;
+      const newItemObj = {
+        id: tempId,
         text: newItem,
         listId: currentList,
         userId: auth.currentUser.uid,
         completed: false,
         createdAt: new Date()
-      });
+      };
+
+      setItems(prev => [...prev, newItemObj]);
       setNewItem("");
+
+      // Pequeño delay para mejor percepción
+      await new Promise(resolve => setTimeout(resolve, 200));
+
+      await addDoc(collection(db, "items"), {
+        text: newItemObj.text,
+        listId: currentList,
+        userId: auth.currentUser.uid,
+        completed: false,
+        createdAt: new Date()
+      });
+
     } catch (err) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
+      console.error("Error añadiendo ítem:", err);
+      setItems(prev => prev.filter(item => item.id !== tempId));
+      setError(`Error al añadir ítem: ${err.message}`);
     }
   };
 
@@ -138,39 +278,43 @@ export function ShoppingList() {
       await deleteDoc(doc(db, "items", id));
       setConfirmDelete(null);
     } catch (err) {
-      setError(err.message);
+      console.log(err.message);
     } finally {
       setLoading(false);
     }
   };
 
   const deleteList = async (listId) => {
+    if (!auth.currentUser?.uid) return;
+
     try {
       setLoading(true);
 
+      // Verifica propiedad antes de eliminar
+      const listDoc = await getDoc(doc(db, "lists", listId));
+      if (listDoc.data()?.userId !== auth.currentUser.uid) {
+        throw new Error("Solo el dueño puede eliminar la lista");
+      }
+
       const batch = writeBatch(db);
 
-      const itemsQuery = query(
-        collection(db, "items"),
-        where("listId", "==", listId)
-      );
-
+      // Elimina items primero
+      const itemsQuery = query(collection(db, "items"), where("listId", "==", listId));
       const itemsSnapshot = await getDocs(itemsQuery);
+
       itemsSnapshot.forEach((itemDoc) => {
         batch.delete(doc(db, "items", itemDoc.id));
       });
 
       batch.delete(doc(db, "lists", listId));
-
       await batch.commit();
 
       if (currentList === listId) {
         setCurrentList("");
       }
-
-      setConfirmListDelete(null);
     } catch (err) {
-      setError(err.message);
+      console.error("Error eliminando lista:", err);
+      setError(`Error al eliminar: ${err.message}`);
     } finally {
       setLoading(false);
     }
@@ -185,34 +329,32 @@ export function ShoppingList() {
   };
 
   const shareList = async () => {
-    if (!currentList || !emailToShare.trim()) return;
+    if (!currentList || !emailToShare.trim() || !auth.currentUser?.uid) return;
 
     try {
-      setLoading(true);
+      // Optimistic UI: Añadir email a sharedWith inmediatamente
+      const tempSharedUsers = [...sharedUsers, emailToShare];
+      setSharedUsers(tempSharedUsers);
 
-      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailToShare)) {
-        throw new Error("Por favor introduce un email válido");
-      }
+      // Actualizar la lista localmente
+      setLists(prev => prev.map(list =>
+        list.id === currentList
+          ? { ...list, sharedWith: tempSharedUsers }
+          : list
+      ));
 
-      if (emailToShare === auth.currentUser.email) {
-        throw new Error("No puedes compartir la lista contigo mismo");
-      }
-
-      if (!emailToShare.trim()) {
-        throw new Error("El email no puede estar vacío");
-      }
-
+      // Operación real en Firebase
       await updateDoc(doc(db, "lists", currentList), {
         sharedWith: arrayUnion(emailToShare)
       });
 
       setEmailToShare("");
       setShareDialogOpen(false);
-      setError(null);
     } catch (err) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
+      console.error("Error compartiendo lista:", err);
+      // Revertir cambios si falla
+      setSharedUsers(sharedUsers.filter(email => email !== emailToShare));
+      setError(`Error al compartir: ${err.message}`);
     }
   };
 
@@ -220,7 +362,18 @@ export function ShoppingList() {
     if (!currentList || !userToUnshare) return;
 
     try {
-      setLoading(true);
+      // Optimistic UI: Eliminar email de sharedWith inmediatamente
+      const tempSharedUsers = sharedUsers.filter(email => email !== userToUnshare);
+      setSharedUsers(tempSharedUsers);
+
+      // Actualizar la lista localmente
+      setLists(prev => prev.map(list =>
+        list.id === currentList
+          ? { ...list, sharedWith: tempSharedUsers }
+          : list
+      ));
+
+      // Operación real en Firebase
       await updateDoc(doc(db, "lists", currentList), {
         sharedWith: arrayRemove(userToUnshare)
       });
@@ -241,24 +394,36 @@ export function ShoppingList() {
 
       setUnshareDialogOpen(false);
       setUserToUnshare("");
-      setError(null);
     } catch (err) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
+      console.error("Error eliminando compartido:", err);
+      // Revertir cambios si falla
+      setSharedUsers([...sharedUsers, userToUnshare]);
+      setError(`Error al eliminar compartido: ${err.message}`);
     }
   };
 
   const toggleItemCompletion = async (itemId, currentStatus) => {
     try {
-      setLoading(true);
+      // Optimistic UI: Actualizar estado localmente primero
+      setItems(prev => prev.map(item =>
+        item.id === itemId
+          ? { ...item, completed: !currentStatus }
+          : item
+      ));
+
+      // Operación real en Firebase
       await updateDoc(doc(db, "items", itemId), {
-        completed: !currentStatus
+        completed: !currentStatus,
       });
     } catch (err) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
+      console.error("Error actualizando item:", err);
+      // Revertir cambios si falla
+      setItems(prev => prev.map(item =>
+        item.id === itemId
+          ? { ...item, completed: currentStatus }
+          : item
+      ));
+      setError(`Error actualizando item: ${err.message}`);
     }
   };
 
@@ -280,9 +445,67 @@ export function ShoppingList() {
   if (error) return (
     <div className="error-screen">
       <p>Error: {error}</p>
-      <button onClick={() => setError(null)}>Reintentar</button>
+      <button onClick={() => console.log(null)}>Reintentar</button>
     </div>
   );
+
+  // Renderizado condicional del input de items
+  const renderItemInput = () => {
+    if (!currentList) return null;
+    
+    return (
+      <div className="items-section">
+        <h3>Ítems</h3>
+        <div className="item-input">
+          <input
+            value={newItem}
+            onChange={(e) => setNewItem(e.target.value)}
+            placeholder="Nuevo ítem"
+            className="elegant-input"
+            onKeyPress={(e) => e.key === 'Enter' && addItem()}
+          />
+          <button
+            onClick={addItem}
+            disabled={!newItem.trim()}
+            className="add-button"
+          >
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M12 4V20M4 12H20" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </button>
+        </div>
+
+        <ul className="items-list">
+          {sortedItems.map(item => (
+            <li key={`item-${item.id}`} className={`item-card ${item.completed ? 'completed' : ''}`}>
+              <div className="item-content">
+                <input
+                  type="checkbox"
+                  checked={item.completed}
+                  onChange={(e) => toggleItemCompletion(item.id, item.completed)}
+                  className="item-checkbox"
+                />
+                <span className={`item-text ${item.completed ? 'strikethrough' : ''}`}>
+                  {item.text}
+                </span>
+              </div>
+              {/* Mostrar botón de eliminar para todos los usuarios en listas compartidas */}
+              {(isCurrentListShared() || isCurrentListOwner()) && (
+                <button
+                  onClick={() => setConfirmDelete(item)}
+                  className="delete-item-btn"
+                >
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M19 7L18.1327 19.1425C18.0579 20.1891 17.187 21 16.1378 21H7.86224C6.81296 21 5.94208 20.1891 5.86732 19.1425L5 7M10 11V17M14 11V17M15 7V4C15 3.44772 14.5523 3 14 3H10C9.44772 3 9 3.44772 9 4V7M4 7H20" stroke="#c62828" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                </button>
+              )}
+            </li>
+          ))}
+        </ul>
+      </div>
+    );
+  };
 
   return (
     <div className="app-container">
@@ -408,7 +631,7 @@ export function ShoppingList() {
                     <h4>Compartido con:</h4>
                     <ul>
                       {sharedUsers.map((email, index) => (
-                        <li key={`shared-${email || index}`}>  // Fallback to index if email is empty
+                        <li key={`shared-${email || index}`}>
                           <span>{email}</span>
                           <button
                             onClick={() => {
@@ -491,7 +714,10 @@ export function ShoppingList() {
                       <input
                         type="checkbox"
                         checked={item.completed}
-                        onChange={() => toggleItemCompletion(item.id, item.completed)}
+                        onChange={(e) => {
+                          e.stopPropagation(); // Prevent event bubbling if needed
+                          toggleItemCompletion(item.id, item.completed);
+                        }}
                         className="item-checkbox"
                         disabled={loading}
                       />
@@ -763,6 +989,15 @@ export function ShoppingList() {
         .action-btn:hover {
           background-color: #e0e0e0;
         }
+
+        .optimistic-item {
+          color: #888;
+          font-style: italic;
+        }
+
+        .optimistic-item:disabled {
+          background-color: #f5f5f5;
+        }
         
         .action-btn:disabled {
           opacity: 0.5;
@@ -884,6 +1119,32 @@ export function ShoppingList() {
         .blue-button:disabled {
           background-color: var(--dark-gray);
           cursor: not-allowed;
+        }
+
+        .optimistic-operation {
+          opacity: 0.8;
+          transition: opacity 0.3s ease;
+        }
+
+        /* Estilos para items en proceso de actualización */
+        .item-updating {
+          position: relative;
+        }
+        .item-updating::after {
+          content: "";
+          position: absolute;
+          top: 0;
+          left: 0;
+          right: 0;
+          bottom: 0;
+          background: rgba(255, 255, 255, 0.5);
+          z-index: 1;
+        }
+
+        /* Estilos para listas compartidas */
+        .shared-list {
+          border-left: 3px solid #1e88e5;
+          padding-left: 8px;
         }
         
         .modal-overlay {

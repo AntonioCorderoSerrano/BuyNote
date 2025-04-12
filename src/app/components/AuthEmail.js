@@ -38,7 +38,9 @@ export function AuthEmail() {
 
   return (
     <div className="auth-container">
+
       <div className="auth-overlay"></div>
+      
       <div className="auth-card">
         <h2 className="auth-title">{isLogin ? "Iniciar sesión" : "Registrarse"}</h2>
 
@@ -85,6 +87,7 @@ export function AuthEmail() {
             type="submit"
             className="auth-button"
             disabled={loading}
+            style={{ color: 'black' }}
           >
             {loading ? (
               <span className="auth-spinner">⏳</span>
@@ -339,6 +342,26 @@ export function AuthEmail() {
           
           .auth-title {
             font-size: 1.3rem;
+          }
+
+          /* Estilos para el contenedor del logo */
+          .auth-logo-container {
+            display: flex;
+            justify-content: center;
+            margin-bottom: 20px;
+          }
+
+          /* Estilos para el logo */
+          .auth-logo {
+            width: 0px; /* Ajusta según el tamaño que necesites */
+            height: 10px;
+            object-fit: contain;
+          }
+
+          /* Ajuste del título para que quede debajo del logo */
+          .auth-title {
+            margin-top: 0;
+            margin-bottom: 20px;
           }
         }
       `}</style>
