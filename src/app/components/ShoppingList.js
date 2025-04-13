@@ -22,6 +22,7 @@ export function ShoppingList() {
   const [unshareDialogOpen, setUnshareDialogOpen] = useState(false);
   const [userToUnshare, setUserToUnshare] = useState("");
   const [userReady, setUserReady] = useState(false);
+  const allLists = [...lists, ...sharedLists];
 
   // Referencias para mantener datos entre renders sin recargar
   const itemsCache = useRef({});
@@ -223,19 +224,26 @@ export function ShoppingList() {
     onChange={(e) => setCurrentList(e.target.value)}
     className="elegant-select"
   >
+    <option value="" disabled selected>
+      {allLists.length > 0 ? "Elija una opción" : "No hay listas disponibles"}
+    </option>
     <optgroup label="Mis listas">
       {lists.map((list) => (
-        <option
-          key={list.id}
-          value={list.id}
-          className={list.isOptimistic ? "optimistic-item" : ""}
-        >
-          {list.name} {list.isOptimistic && "(Guardando...)"}
+        <option key={list.id} value={list.id}>
+          {list.name}
         </option>
       ))}
     </optgroup>
+    {sharedLists.length > 0 && (
+      <optgroup label="Listas compartidas conmigo">
+        {sharedLists.map((list) => (
+          <option key={list.id} value={list.id}>
+            {list.name}
+          </option>
+        ))}
+      </optgroup>
+    )}
   </select>
-
 
   const addItem = async () => {
     if (!userReady || !auth.currentUser?.uid || !currentList || !newItem.trim()) return;
@@ -267,9 +275,9 @@ export function ShoppingList() {
       });
 
     } catch (err) {
-      console.error("Error añadiendo ítem:", err);
+      console.error("Error añadiendo producto:", err);
       setItems(prev => prev.filter(item => item.id !== tempId));
-      setError(`Error al añadir ítem: ${err.message}`);
+      setError(`Error al añadir producto: ${err.message}`);
     }
   };
 
@@ -279,8 +287,8 @@ export function ShoppingList() {
       await deleteDoc(doc(db, "items", id)); // ✅ Esto ya está bien
       setConfirmDelete(null);
     } catch (err) {
-      console.error("Error borrando ítem:", err);
-      alert("No tienes permiso para borrar este ítem"); // Mensaje útil
+      console.error("Error borrando producto:", err);
+      alert("No tienes permiso para borrar este producto"); // Mensaje útil
     } finally {
       setLoading(false);
     }
@@ -290,8 +298,6 @@ export function ShoppingList() {
     if (!auth.currentUser?.uid) return;
 
     try {
-      setLoading(true);
-
       // Verifica propiedad antes de eliminar
       const listDoc = await getDoc(doc(db, "lists", listId));
       if (listDoc.data()?.userId !== auth.currentUser.uid) {
@@ -311,14 +317,14 @@ export function ShoppingList() {
       batch.delete(doc(db, "lists", listId));
       await batch.commit();
 
+      setConfirmListDelete(null);
+
       if (currentList === listId) {
         setCurrentList("");
       }
     } catch (err) {
       console.error("Error eliminando lista:", err);
       setError(`Error al eliminar: ${err.message}`);
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -334,27 +340,18 @@ export function ShoppingList() {
     if (!currentList || !emailToShare.trim() || !auth.currentUser?.uid) return;
 
     try {
-      // Optimistic UI: Añadir email a sharedWith inmediatamente
+      // Optimistic UI
       const tempSharedUsers = [...sharedUsers, emailToShare];
       setSharedUsers(tempSharedUsers);
 
-      // Actualizar la lista localmente
-      setLists(prev => prev.map(list =>
-        list.id === currentList
-          ? { ...list, sharedWith: tempSharedUsers }
-          : list
-      ));
-
-      // Operación real en Firebase
       await updateDoc(doc(db, "lists", currentList), {
         sharedWith: arrayUnion(emailToShare)
       });
 
       setEmailToShare("");
-      setShareDialogOpen(false);
+      setShareDialogOpen(false); // Cierra el modal inmediatamente después de compartir
     } catch (err) {
       console.error("Error compartiendo lista:", err);
-      // Revertir cambios si falla
       setSharedUsers(sharedUsers.filter(email => email !== emailToShare));
       setError(`Error al compartir: ${err.message}`);
     }
@@ -406,7 +403,7 @@ export function ShoppingList() {
 
   const toggleItemCompletion = async (itemId, currentStatus) => {
     if (!itemId || typeof itemId !== "string") {
-      console.error("ID de ítem no válido:", itemId);
+      console.error("ID de producto no válido:", itemId);
       return;
     }
 
@@ -433,8 +430,6 @@ export function ShoppingList() {
     if (!a.completed && b.completed) return -1;
     return 0;
   });
-
-  const allLists = [...lists, ...sharedLists];
 
   if (loading) return (
     <div className="loading-screen">
@@ -646,13 +641,12 @@ export function ShoppingList() {
                   value={newItem}
                   onChange={(e) => setNewItem(e.target.value)}
                   placeholder="Nuevo producto"
-                  disabled={loading}
                   className="elegant-input"
                   onKeyPress={(e) => e.key === 'Enter' && addItem()}
                 />
                 <button
                   onClick={addItem}
-                  disabled={loading || !newItem.trim()}
+                  disabled={!newItem.trim()}
                   className="add-button"
                 >
                   <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -720,7 +714,7 @@ export function ShoppingList() {
       )}
 
       {confirmListDelete && (
-        <div className="modal-overlay" >
+        <div className="modal-overlay">
           <div className="confirmation-modal" style={{ backgroundColor: "white" }}>
             <p>¿Eliminar la lista "{confirmListDelete.name}" y todos sus productos?</p>
             <div className="modal-buttons">
@@ -731,11 +725,14 @@ export function ShoppingList() {
                 Cancelar
               </button>
               <button
-                onClick={() => deleteList(confirmListDelete.id)}
+                onClick={() => {
+                  deleteList(confirmListDelete.id);
+                }}
                 className="confirm-delete-btn"
                 style={{ backgroundColor: "red" }}
+                disabled={loading}
               >
-                Eliminar
+                {loading ? "Eliminando..." : "Eliminar"}
               </button>
             </div>
           </div>
