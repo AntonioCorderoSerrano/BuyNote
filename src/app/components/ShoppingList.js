@@ -746,8 +746,8 @@ export function ShoppingList() {
           --light-blue: #bbdefb;
           --white: #ffffff;
           --gray: #f5f5f5;
-          --dark-gray: #757575;
-          --text-color: #212121;
+          --dark-gray: #424242; 
+          --text-color: #000000;
           --completed-item: #f5f5f5;
           --error-red: #c62828;
         }
@@ -857,6 +857,41 @@ export function ShoppingList() {
           color: var(--text-color);
           min-width: 0;
           width: 100%;
+        }
+
+        .elegant-input {
+          color: var(--text-color); /* Texto negro */
+        }
+
+        .elegant-input::placeholder {
+          color: var(--dark-gray); /* Placeholder gris oscuro */
+          opacity: 1; /* Asegura que se muestre con opacidad completa */
+        }
+
+        .elegant-select {
+          color: var(--text-color); /* Texto negro en selects */
+        }
+
+        .no-lists-message {
+          color: var(--dark-gray); /* Mensajes de texto gris oscuro */
+        }
+
+        .shared-users h4 {
+          color: var(--dark-gray); /* Gris oscuro para títulos secundarios */
+        }
+
+        .strikethrough {
+          color: var(--dark-gray); /* Gris oscuro para items completados */
+        }
+
+        /* Asegura que todos los textos sean negros por defecto */
+        body, p, h1, h2, h3, h4, h5, h6, span, div {
+          color: var(--text-color);
+        }
+
+        /* Excepciones para textos secundarios */
+        .secondary-text {
+          color: var(--dark-gray);
         }
         
         .elegant-input:focus {
