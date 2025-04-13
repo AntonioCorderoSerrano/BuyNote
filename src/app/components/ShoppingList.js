@@ -560,7 +560,7 @@ export function ShoppingList() {
 
           {shareDialogOpen && (
             <div className="modal-overlay">
-              <div className="share-modal">
+              <div className="share-modal" style={{ backgroundColor: "white" }}>
                 <h3>Compartir lista</h3>
                 <div className="share-input">
                   <input
@@ -574,6 +574,7 @@ export function ShoppingList() {
                     onClick={shareList}
                     disabled={loading || !emailToShare.trim()}
                     className="blue-button"
+                    style={{ backgroundColor: "green" }}
                   >
                     Compartir
                   </button>
@@ -612,7 +613,7 @@ export function ShoppingList() {
 
           {unshareDialogOpen && (
             <div className="modal-overlay">
-              <div className="confirmation-modal">
+              <div className="confirmation-modal" style={{ backgroundColor: "white" }}>
                 <p>¿Dejar de compartir la lista con {userToUnshare}?</p>
                 <div className="modal-buttons">
                   <button
@@ -628,6 +629,7 @@ export function ShoppingList() {
                     onClick={unshareList}
                     disabled={loading}
                     className="confirm-delete-btn"
+                    style={{ backgroundColor: "red" }}
                   >
                     Confirmar
                   </button>
