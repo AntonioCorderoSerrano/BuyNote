@@ -457,7 +457,7 @@ export function ShoppingList() {
             height="60"
             style={{ objectFit: 'contain' }}
           />
-          <span className="app-name">BuyNote</span>
+          <span className="app-name" style={{ color: "black" }}>BuyNote</span>
         </div>
         <button
           className="logout-btn"
@@ -480,6 +480,7 @@ export function ShoppingList() {
               onChange={(e) => setNewListName(e.target.value)}
               placeholder="Nombre de nueva lista"
               className="elegant-input"
+              style={{ color: "black", placeholder: "darkgray" }}
             />
             <button
               onClick={createList}
@@ -501,24 +502,25 @@ export function ShoppingList() {
                   onChange={(e) => setCurrentList(e.target.value)}
                   disabled={loading}
                   className="elegant-select"
+                  style={{ color: "black" }}
                 >
                   {/* Opción predeterminada */}
-                  <option value="" disabled hidden>
+                  <option value="" disabled hidden style={{ color: "darkgray" }}>
                     Selecciona una lista para ver sus productos
                   </option>
 
-                  <optgroup label="Mis listas">
+                  <optgroup label="Mis listas" style={{ color: "black" }}>
                     {lists.map((list, index) => (
-                      <option key={`my-${list.id || index}`} value={list.id}>
+                      <option key={`my-${list.id || index}`} value={list.id} style={{ color: "black" }}>
                         {list.name}
                       </option>
                     ))}
                   </optgroup>
 
                   {sharedLists.length > 0 && (
-                    <optgroup label="Listas compartidas conmigo">
+                    <optgroup label="Listas compartidas conmigo" style={{ color: "black" }}>
                       {sharedLists.map((list, index) => (
-                        <option key={`shared-${list.id || index}`} value={list.id}>
+                        <option key={`shared-${list.id || index}`} value={list.id} style={{ color: "black" }}>
                           {list.name}
                         </option>
                       ))}
@@ -550,13 +552,13 @@ export function ShoppingList() {
               </div>
             </div>
           ) : (
-            <p className="no-lists-message">No tienes listas creadas</p>
+            <p className="no-lists-message" style={{ color: "black" }}>No tienes listas creadas</p>
           )}
 
           {shareDialogOpen && (
             <div className="modal-overlay">
               <div className="share-modal" style={{ backgroundColor: "white" }}>
-                <h3>Compartir lista</h3>
+                <h3 style={{ color: "black" }}>Compartir lista</h3>
                 <div className="share-input">
                   <input
                     type="email"
@@ -564,6 +566,7 @@ export function ShoppingList() {
                     onChange={(e) => setEmailToShare(e.target.value)}
                     placeholder="Introduce el email"
                     className="elegant-input"
+                    style={{ color: "black", placeholder: "darkgray" }}
                   />
                   <button
                     onClick={shareList}
@@ -576,10 +579,10 @@ export function ShoppingList() {
                 </div>
                 {sharedUsers.length > 0 && (
                   <div className="shared-users">
-                    <h4>Compartido con:</h4>
+                    <h4 style={{ color: "black" }}>Compartido con:</h4>
                     <ul>
                       {sharedUsers.map((email, index) => (
-                        <li key={`shared-${email || index}`}>
+                        <li key={`shared-${email || index}`} style={{ color: "black" }}>
                           <span>{email}</span>
                           <button
                             onClick={() => {
@@ -609,7 +612,7 @@ export function ShoppingList() {
           {unshareDialogOpen && (
             <div className="modal-overlay">
               <div className="confirmation-modal" style={{ backgroundColor: "white" }}>
-                <p>¿Dejar de compartir la lista con {userToUnshare}?</p>
+                <p style={{ color: "black" }}>¿Dejar de compartir la lista con {userToUnshare}?</p>
                 <div className="modal-buttons">
                   <button
                     onClick={() => {
@@ -635,7 +638,7 @@ export function ShoppingList() {
 
           {currentList && (
             <div className="items-section">
-              <h3>Productos</h3>
+              <h3 style={{ color: "black" }}>Productos</h3>
               <div className="item-input">
                 <input
                   value={newItem}
@@ -643,6 +646,7 @@ export function ShoppingList() {
                   placeholder="Nuevo producto"
                   className="elegant-input"
                   onKeyPress={(e) => e.key === 'Enter' && addItem()}
+                  style={{ color: "black", placeholder: "darkgray" }}
                 />
                 <button
                   onClick={addItem}
@@ -663,13 +667,13 @@ export function ShoppingList() {
                         type="checkbox"
                         checked={item.completed}
                         onChange={(e) => {
-                          e.stopPropagation(); // Prevent event bubbling if needed
+                          e.stopPropagation();
                           toggleItemCompletion(item.id, item.completed);
                         }}
                         className="item-checkbox"
                         disabled={loading}
                       />
-                      <span className={`item-text ${item.completed ? 'strikethrough' : ''}`}>
+                      <span className={`item-text ${item.completed ? 'strikethrough' : ''}`} style={{ color: "black" }}>
                         {item.text}
                       </span>
                     </div>
@@ -693,7 +697,7 @@ export function ShoppingList() {
       {confirmDelete && (
         <div className="modal-overlay">
           <div className="confirmation-modal" style={{ backgroundColor: "white" }}>
-            <p>¿Eliminar "{confirmDelete.text}"?</p>
+            <p style={{ color: "black" }}>¿Eliminar "{confirmDelete.text}"?</p>
             <div className="modal-buttons">
               <button
                 onClick={() => setConfirmDelete(null)}
@@ -716,7 +720,7 @@ export function ShoppingList() {
       {confirmListDelete && (
         <div className="modal-overlay">
           <div className="confirmation-modal" style={{ backgroundColor: "white" }}>
-            <p>¿Eliminar la lista "{confirmListDelete.name}" y todos sus productos?</p>
+            <p style={{ color: "black" }}>¿Eliminar la lista "{confirmListDelete.name}" y todos sus productos?</p>
             <div className="modal-buttons">
               <button
                 onClick={() => setConfirmListDelete(null)}
