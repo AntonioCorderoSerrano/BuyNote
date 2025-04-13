@@ -487,9 +487,10 @@ export function ShoppingList() {
               disabled={loading || !newListName.trim()}
               className="add-button"
               title="Crear nueva lista"
+              color="blue"
             >
               <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <path d="M12 4V20M4 12H20" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                <path d="M12 4V20M4 12H20" stroke="#000000" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
             </button>
           </div>
@@ -905,8 +906,6 @@ export function ShoppingList() {
         }
         
         .add-button {
-          background-color: var(--white);
-          color: var(--dark-blue);
           border: 1px solid var(--dark-blue);
           padding: 10px 16px;
           border-radius: 8px;
@@ -1116,20 +1115,6 @@ export function ShoppingList() {
           transition: opacity 0.3s ease;
         }
 
-        /* Estilos para items en proceso de actualización */
-        .item-updating {
-          position: relative;
-        }
-        .item-updating::after {
-          content: "";
-          position: absolute;
-          top: 0;
-          left: 0;
-          right: 0;
-          bottom: 0;
-          background: rgba(255, 255, 255, 0.5);
-          z-index: 1;
-        }
 
         /* Estilos para listas compartidas */
         .shared-list {
@@ -1188,9 +1173,6 @@ export function ShoppingList() {
           border: 1px solid #e0e0e0;
         }
         
-        .cancel-btn:hover {
-          background-color: #e0e0e0;
-        }
         
         .confirm-delete-btn {
           background-color: var(--error-red);
