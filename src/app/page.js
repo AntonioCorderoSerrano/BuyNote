@@ -3,7 +3,6 @@ import { useState, useEffect } from "react";
 import { auth } from "./firebase";
 import { AuthEmail } from "./components/AuthEmail";
 import { ShoppingList } from "./components/ShoppingList";
-import Head from 'next/head'
 
 function App() {
   const [user, setUser] = useState(null);

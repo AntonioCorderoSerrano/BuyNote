@@ -16,17 +16,59 @@ export function AuthEmail() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    
+    // Validación mejorada
+    if (!email.trim()) {
+      setError("Por favor ingresa tu correo electrónico");
+      return;
+    }
+    
+    if (!password.trim()) {
+      setError("Por favor ingresa tu contraseña");
+      return;
+    }
+  
+    if (!/\S+@\S+\.\S+/.test(email)) {
+      setError("Por favor ingresa un correo electrónico válido");
+      return;
+    }
+  
     try {
       setLoading(true);
       setError(null);
-
+  
+      console.log("Intentando autenticar con:", { email, isLogin }); // Log sin password por seguridad
+  
       if (isLogin) {
         await signInWithEmailAndPassword(auth, email, password);
       } else {
         await createUserWithEmailAndPassword(auth, email, password);
       }
     } catch (error) {
-      setError(error.message);
+      console.error("Error completo:", error);
+      
+      switch (error.code) {
+        case "auth/wrong-password":
+          setError("Contraseña incorrecta. Por favor, inténtalo de nuevo.");
+          break;
+        case "auth/user-not-found":
+          setError("No existe una cuenta con este correo electrónico.");
+          break;
+        case "auth/invalid-credential":
+          setError("Credenciales inválidas. Verifica tu correo y contraseña.");
+          break;
+        case "auth/email-already-in-use":
+          setError("Este correo ya está registrado. Inicia sesión o usa otro correo.");
+          break;
+        case "auth/weak-password":
+          setError("La contraseña debe tener al menos 6 caracteres.");
+          break;
+        case "auth/too-many-requests":
+          setError("Demasiados intentos fallidos. Intenta más tarde o restablece tu contraseña.");
+          break;
+        default:
+          setError(`Error durante la autenticación: ${error.message}`);
+      }
     } finally {
       setLoading(false);
     }
