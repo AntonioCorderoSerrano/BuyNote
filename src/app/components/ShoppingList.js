@@ -1,3 +1,4 @@
+import React from 'react';
 import { useState, useEffect, useRef } from "react";
 import { db, auth } from "../firebase";
 import { collection, addDoc, query, where, onSnapshot, deleteDoc, writeBatch, getDocs, arrayUnion, arrayRemove, getDoc } from "firebase/firestore";
@@ -22,7 +23,82 @@ export function ShoppingList() {
   const [unshareDialogOpen, setUnshareDialogOpen] = useState(false);
   const [userToUnshare, setUserToUnshare] = useState("");
   const [userReady, setUserReady] = useState(false);
+  const [selectedCategory, setSelectedCategory] = useState("");
+  const [sortByPurchased, setSortByPurchased] = useState(false);
   const allLists = [...lists, ...sharedLists];
+
+  // Categorías disponibles
+  const CATEGORIES = {
+    "DAIRY": [
+      "leche", "queso", "yogur", "mantequilla", "nata", "crema",
+      "queso crema", "leche condensada", "leche evaporada", "requesón", "kefir", "batido de leche"
+    ],
+    "BEVERAGES": [
+      "agua", "refresco", "zumo", "jugo", "cerveza", "vino", "café", "té",
+      "bebida energética", "batido", "licor", "kombucha", "agua con gas", "horchata", "infusión"
+    ],
+    "MEAT": [
+      "pollo", "ternera", "cerdo", "pavo", "cordero", "chuleta", "filete", "salchicha",
+      "jamón", "bacon", "costilla", "albóndigas", "chorizo", "morcilla", "lomo", "hamburguesa"
+    ],
+    "FRUITS_VEGETABLES": [
+      "manzana", "plátano", "naranja", "lechuga", "tomate", "zanahoria", "cebolla", "pimiento",
+      "pera", "kiwi", "melón", "sandía", "piña", "fresa", "espinaca", "brócoli", "coliflor",
+      "ajo", "pepino", "calabacín", "berenjena", "aguacate", "uvas", "champiñones"
+    ],
+    "BAKERY": [
+      "pan", "bollo", "baguette", "tostada", "croissant", "galleta",
+      "magdalena", "bizcocho", "donut", "empanada", "pan integral", "pan de molde"
+    ],
+    "CLEANING": [
+      "jabón", "detergente", "limpiador", "lejía", "esponja", "papel higiénico",
+      "limpiacristales", "lavavajillas", "suavizante", "desinfectante", "guantes", "fregasuelos"
+    ],
+    "CONGELADOS": [
+      "helado", "pizza", "verduras congeladas", "pescado congelado",
+      "croquetas", "nuggets", "empanadillas", "lasaña congelada", "tarta helada", "pan congelado"
+    ],
+    "SNACKS": [
+      "patatas fritas", "gusanitos", "palomitas", "barritas energéticas", "galletas saladas",
+      "chocolate", "caramelos", "chicles", "turrón", "bombones", "frutos secos"
+    ],
+    "CANNED": [
+      "atún en lata", "maíz en lata", "sardinas", "tomate triturado", "alubias en conserva",
+      "garbanzos en lata", "pimientos asados", "olivas", "fruta en almíbar", "paté"
+    ],
+    "GRAINS_PASTA": [
+      "arroz", "pasta", "espaguetis", "macarrones", "quinoa", "cuscús",
+      "harina", "sémola", "copos de avena", "pan rallado", "fideos"
+    ],
+    "SAUCES_SPICES": [
+      "sal", "azúcar", "pimienta", "orégano", "vinagre", "aceite de oliva", "aceite de girasol",
+      "salsa de tomate", "mayonesa", "ketchup", "mostaza", "salsa barbacoa", "caldo concentrado", "curry"
+    ],
+    "PERSONAL_CARE": [
+      "champú", "gel de baño", "desodorante", "pasta de dientes", "cepillo de dientes",
+      "maquinilla de afeitar", "cuchillas", "papel higiénico", "pañuelos", "toallitas"
+    ],
+    "PET": [
+      "comida para perros", "comida para gatos", "arena para gatos", "huesos", "snacks para mascotas",
+      "juguetes para mascotas", "collar", "champú para mascotas"
+    ],
+    "BABY": [
+      "pañales", "toallitas húmedas", "papilla", "leche infantil", "biberones", "crema para bebés"
+    ],
+    "OTHER": [
+      "pilas", "velas", "encendedor", "bolsas de basura", "revista", "cuaderno", "bombilla"
+    ]
+  };
+
+  const detectCategory = (productName) => {
+    const lowerName = productName.toLowerCase();
+    for (const [category, keywords] of Object.entries(CATEGORIES)) {
+      if (keywords.some(keyword => lowerName.includes(keyword))) {
+        return category;
+      }
+    }
+    return "OTHER"; // Categoría por defecto si no coincide con ninguna
+  };
 
   // Referencias para mantener datos entre renders sin recargar
   const itemsCache = useRef({});
@@ -218,52 +294,26 @@ export function ShoppingList() {
     }
   };
 
-  // En el renderizado del select de listas:
-  <select
-    value={currentList}
-    onChange={(e) => setCurrentList(e.target.value)}
-    className="elegant-select"
-  >
-    <option value="" disabled selected>
-      {allLists.length > 0 ? "Elija una opción" : "No hay listas disponibles"}
-    </option>
-    <optgroup label="Mis listas">
-      {lists.map((list) => (
-        <option key={list.id} value={list.id}>
-          {list.name}
-        </option>
-      ))}
-    </optgroup>
-    {sharedLists.length > 0 && (
-      <optgroup label="Listas compartidas conmigo">
-        {sharedLists.map((list) => (
-          <option key={list.id} value={list.id}>
-            {list.name}
-          </option>
-        ))}
-      </optgroup>
-    )}
-  </select>
-
   const addItem = async () => {
     if (!userReady || !auth.currentUser?.uid || !currentList || !newItem.trim()) return;
 
     try {
       // Optimistic UI update
       const tempId = `temp-item-${Date.now()}`;
+      const detectedCategory = detectCategory(newItem);
       const newItemObj = {
         id: tempId,
         text: newItem,
         listId: currentList,
         userId: auth.currentUser.uid,
         completed: false,
+        category: detectedCategory, // Asignar categoría automáticamente
         createdAt: new Date()
       };
 
       setItems(prev => [...prev, newItemObj]);
       setNewItem("");
 
-      // Pequeño delay para mejor percepción
       await new Promise(resolve => setTimeout(resolve, 200));
 
       await addDoc(collection(db, "items"), {
@@ -271,6 +321,7 @@ export function ShoppingList() {
         listId: currentList,
         userId: auth.currentUser.uid,
         completed: false,
+        category: newItemObj.category,
         createdAt: new Date()
       });
 
@@ -284,11 +335,11 @@ export function ShoppingList() {
   const deleteItem = async (id) => {
     try {
       setLoading(true);
-      await deleteDoc(doc(db, "items", id)); // ✅ Esto ya está bien
+      await deleteDoc(doc(db, "items", id));
       setConfirmDelete(null);
     } catch (err) {
       console.error("Error borrando producto:", err);
-      alert("No tienes permiso para borrar este producto"); // Mensaje útil
+      alert("No tienes permiso para borrar este producto");
     } finally {
       setLoading(false);
     }
@@ -349,7 +400,7 @@ export function ShoppingList() {
       });
 
       setEmailToShare("");
-      setShareDialogOpen(false); // Cierra el modal inmediatamente después de compartir
+      setShareDialogOpen(false);
     } catch (err) {
       console.error("Error compartiendo lista:", err);
       setSharedUsers(sharedUsers.filter(email => email !== emailToShare));
@@ -402,33 +453,58 @@ export function ShoppingList() {
   };
 
   const toggleItemCompletion = async (itemId, currentStatus) => {
-    if (!itemId || typeof itemId !== "string") {
-      console.error("ID de producto no válido:", itemId);
-      return;
-    }
-
     try {
-      // Optimistic UI update
+      const currentItem = items.find(item => item.id === itemId);
+      if (!currentItem) return;
+
+      // Determinar nueva categoría
+      const newCategory = currentStatus ? currentItem.originalCategory || currentItem.category : "COMPRADO";
+
+      // Actualizar estado local
       setItems(prev => prev.map(item =>
-        item.id === itemId ? { ...item, completed: !currentStatus } : item
+        item.id === itemId
+          ? {
+            ...item,
+            completed: !currentStatus,
+            category: newCategory,
+            // Guardar la categoría original si estamos marcando como completado
+            originalCategory: currentStatus ? item.originalCategory : currentItem.category
+          }
+          : item
       ));
 
-      // Construye la referencia correctamente
+      // Actualizar en Firebase
       const itemRef = doc(db, "items", itemId);
-      await updateDoc(itemRef, { completed: !currentStatus });
+      await updateDoc(itemRef, {
+        completed: !currentStatus,
+        category: newCategory,
+        originalCategory: currentStatus ? currentItem.originalCategory : currentItem.category
+      });
+
     } catch (err) {
       console.error("Error actualizando item:", err);
-      // Revertir cambios
+      // Revertir en caso de error
       setItems(prev => prev.map(item =>
-        item.id === itemId ? { ...item, completed: currentStatus } : item
+        item.id === itemId
+          ? { ...item, completed: currentStatus }
+          : item
       ));
     }
   };
 
   const sortedItems = [...items].sort((a, b) => {
-    if (a.completed && !b.completed) return 1;
-    if (!a.completed && b.completed) return -1;
-    return 0;
+    // Primero separar por completado (no completados primero)
+    if (a.completed !== b.completed) {
+      return a.completed ? 1 : -1;
+    }
+
+    // Luego ordenar por categoría
+    if (a.category !== b.category) {
+      return a.category.localeCompare(b.category);
+    }
+
+    // Finalmente ordenar por texto
+    return a.text.localeCompare(b.text);
   });
 
   if (loading) return (
@@ -441,10 +517,9 @@ export function ShoppingList() {
   if (error) return (
     <div className="error-screen">
       <p>Error: {error}</p>
-      <button onClick={() => console.log(null)}>Reintentar</button>
+      <button onClick={() => setError(null)}>Reintentar</button>
     </div>
   );
-
 
   return (
     <div className="app-container">
@@ -505,7 +580,6 @@ export function ShoppingList() {
                   className="elegant-select"
                   style={{ color: "black" }}
                 >
-                  {/* Opción predeterminada */}
                   <option value="" disabled hidden style={{ color: "darkgray" }}>
                     Selecciona una lista para ver sus productos
                   </option>
@@ -603,7 +677,7 @@ export function ShoppingList() {
                 <button
                   onClick={() => setShareDialogOpen(false)}
                   className="cancel-btn"
-                  style={{color:"black"}}
+                  style={{ color: "black" }}
                 >
                   Cerrar
                 </button>
@@ -622,7 +696,7 @@ export function ShoppingList() {
                       setShareDialogOpen(true);
                     }}
                     className="cancel-btn"
-                    style={{color:"black"}}
+                    style={{ color: "black" }}
                   >
                     Cancelar
                   </button>
@@ -641,8 +715,11 @@ export function ShoppingList() {
 
           {currentList && (
             <div className="items-section">
-              <h3 style={{ color: "black" }}>Productos</h3>
-              <div className="item-input">
+              <div className="items-header">
+                <h3 style={{ color: "black" }}>Productos</h3>
+              </div>
+
+              <div className="item-input-container">
                 <input
                   value={newItem}
                   onChange={(e) => setNewItem(e.target.value)}
@@ -663,34 +740,106 @@ export function ShoppingList() {
               </div>
 
               <ul className="items-list">
-                {sortedItems.map(item => (
-                  <li key={`item-${item.id}`} className={`item-card ${item.completed ? 'completed' : ''}`}>
-                    <div className="item-content">
-                      <input
-                        type="checkbox"
-                        checked={item.completed}
-                        onChange={(e) => {
-                          e.stopPropagation();
-                          toggleItemCompletion(item.id, item.completed);
-                        }}
-                        className="item-checkbox"
-                        disabled={loading}
-                      />
-                      <span className={`item-text ${item.completed ? 'strikethrough' : ''}`} style={{ color: "black" }}>
-                        {item.text}
-                      </span>
-                    </div>
-                    <button
-                      onClick={() => setConfirmDelete(item)}
-                      disabled={loading}
-                      className="delete-item-btn"
-                    >
-                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                        <path d="M19 7L18.1327 19.1425C18.0579 20.1891 17.187 21 16.1378 21H7.86224C6.81296 21 5.94208 20.1891 5.86732 19.1425L5 7M10 11V17M14 11V17M15 7V4C15 3.44772 14.5523 3 14 3H10C9.44772 3 9 3.44772 9 4V7M4 7H20" stroke="#c62828" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                      </svg>
-                    </button>
-                  </li>
-                ))}
+                {/* Items no completados agrupados por categoría */}
+                {sortedItems
+                  .filter(item => !item.completed)
+                  .map((item, index, filteredArray) => {
+                    const showCategoryHeader = index === 0 ||
+                      item.category !== filteredArray[index - 1].category;
+
+                    return (
+                      <React.Fragment key={`item-${item.id}`}>
+                        {showCategoryHeader && (
+                          <li className="category-header">
+                            <span style={{ color: "black" }}>
+                              {item.category === "FRUITS_VEGETABLES" && "Frutas y verduras"}
+                              {item.category === "MEAT" && "Carne"}
+                              {item.category === "FISH" && "Pescado"} {/* Por si luego lo agregas */}
+                              {item.category === "DAIRY" && "Lácteos"}
+                              {item.category === "BAKERY" && "Panadería"}
+                              {item.category === "CLEANING" && "Limpieza"}
+                              {item.category === "BEVERAGES" && "Bebidas"}
+                              {item.category === "CONGELADOS" && "Congelados"}
+                              {item.category === "SNACKS" && "Snacks"}
+                              {item.category === "CANNED" && "Conservas"}
+                              {item.category === "GRAINS_PASTA" && "Arroces y pastas"}
+                              {item.category === "SAUCES_SPICES" && "Salsas y especias"}
+                              {item.category === "PERSONAL_CARE" && "Higiene personal"}
+                              {item.category === "PET" && "Mascotas"}
+                              {item.category === "BABY" && "Bebé"}
+                              {item.category === "PANTRY" && "Despensa"} {/* Por si la usas */}
+                              {item.category === "OTHER" && "Otros"}
+                            </span>
+                          </li>
+                        )}
+                        <li className="item-card">
+                          <div className="item-content">
+                            <input
+                              type="checkbox"
+                              checked={item.completed}
+                              onChange={(e) => {
+                                e.stopPropagation();
+                                toggleItemCompletion(item.id, item.completed);
+                              }}
+                              className="item-checkbox"
+                              disabled={loading}
+                            />
+                            <span className="item-text" style={{ color: "black" }}>
+                              {item.text}
+                            </span>
+                          </div>
+                          <button
+                            onClick={() => setConfirmDelete(item)}
+                            disabled={loading}
+                            className="delete-item-btn"
+                          >
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                              <path d="M19 7L18.1327 19.1425C18.0579 20.1891 17.187 21 16.1378 21H7.86224C6.81296 21 5.94208 20.1891 5.86732 19.1425L5 7M10 11V17M14 11V17M15 7V4C15 3.44772 14.5523 3 14 3H10C9.44772 3 9 3.44772 9 4V7M4 7H20" stroke="#c62828" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                            </svg>
+                          </button>
+                        </li>
+                      </React.Fragment>
+                    );
+                  })}
+
+                {/* Sección de COMPRADO (solo si hay items completados) */}
+                {sortedItems.some(item => item.completed) && (
+                  <>
+                    <li className="category-header completed-header">
+                      <span style={{ color: "black"}}>COMPRADO</span>
+                    </li>
+                    {sortedItems
+                      .filter(item => item.completed)
+                      .map(item => (
+                        <li key={`completed-${item.id}`} className="item-card completed">
+                          <div className="item-content">
+                            <input
+                              type="checkbox"
+                              checked={item.completed}
+                              onChange={(e) => {
+                                e.stopPropagation();
+                                toggleItemCompletion(item.id, item.completed);
+                              }}
+                              className="item-checkbox"
+                              disabled={loading}
+                            />
+                            <span className="item-text strikethrough" style={{ color: "black" }}>
+                              {item.text}
+                            </span>
+                          </div>
+                          <button
+                            onClick={() => setConfirmDelete(item)}
+                            disabled={loading}
+                            className="delete-item-btn"
+                          >
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                              <path d="M19 7L18.1327 19.1425C18.0579 20.1891 17.187 21 16.1378 21H7.86224C6.81296 21 5.94208 20.1891 5.86732 19.1425L5 7M10 11V17M14 11V17M15 7V4C15 3.44772 14.5523 3 14 3H10C9.44772 3 9 3.44772 9 4V7M4 7H20" stroke="#c62828" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                            </svg>
+                          </button>
+                        </li>
+                      ))}
+                  </>
+                )}
               </ul>
             </div>
           )}
@@ -705,7 +854,7 @@ export function ShoppingList() {
               <button
                 onClick={() => setConfirmDelete(null)}
                 className="cancel-btn"
-                style={{color:"black"}}
+                style={{ color: "black" }}
               >
                 Cancelar
               </button>
@@ -729,7 +878,7 @@ export function ShoppingList() {
               <button
                 onClick={() => setConfirmListDelete(null)}
                 className="cancel-btn"
-                style={{color:"black"}}
+                style={{ color: "black" }}
               >
                 Cancelar
               </button>
@@ -869,36 +1018,34 @@ export function ShoppingList() {
         }
 
         .elegant-input {
-          color: var(--text-color); /* Texto negro */
+          color: var(--text-color);
         }
 
         .elegant-input::placeholder {
-          color: var(--dark-gray); /* Placeholder gris oscuro */
-          opacity: 1; /* Asegura que se muestre con opacidad completa */
+          color: var(--dark-gray);
+          opacity: 1;
         }
 
         .elegant-select {
-          color: var(--text-color); /* Texto negro en selects */
+          color: var(--text-color);
         }
 
         .no-lists-message {
-          color: var(--dark-gray); /* Mensajes de texto gris oscuro */
+          color: var(--dark-gray);
         }
 
         .shared-users h4 {
-          color: var(--dark-gray); /* Gris oscuro para títulos secundarios */
+          color: var(--dark-gray);
         }
 
         .strikethrough {
-          color: var(--dark-gray); /* Gris oscuro para items completados */
+          color: var(--dark-gray);
         }
 
-        /* Asegura que todos los textos sean negros por defecto */
         body, p, h1, h2, h3, h4, h5, h6, span, div {
           color: var(--text-color);
         }
 
-        /* Excepciones para textos secundarios */
         .secondary-text {
           color: var(--dark-gray);
         }
@@ -1008,17 +1155,42 @@ export function ShoppingList() {
           width: 100%;
         }
         
-        .items-section h3 {
-          color: var(--dark-blue);
+        .items-header {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
           margin-bottom: 15px;
-          font-size: 1.3rem;
         }
         
-        .item-input {
+        .sort-checkbox {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          color: black;
+          cursor: pointer;
+        }
+        
+        .sort-checkbox input {
+          width: 18px;
+          height: 18px;
+          cursor: pointer;
+        }
+        
+        .item-input-container {
           display: flex;
           gap: 10px;
           margin-bottom: 20px;
           width: 100%;
+        }
+        
+        .category-select {
+          padding: 12px 15px;
+          border: 1px solid #e2e8f0;
+          border-radius: 8px;
+          font-size: 1rem;
+          background-color: var(--white);
+          color: var(--text-color);
+          min-width: 180px;
         }
         
         .items-list {
@@ -1026,6 +1198,14 @@ export function ShoppingList() {
           width: 100%;
           padding: 0;
           margin: 0;
+        }
+        
+        .category-header {
+          padding: 8px 15px;
+          border-radius: 8px;
+          margin: 10px 0 5px 0;
+          font-weight: bold;
+          color: var(--text-color);
         }
         
         .item-card {
@@ -1119,8 +1299,6 @@ export function ShoppingList() {
           transition: opacity 0.3s ease;
         }
 
-
-        /* Estilos para listas compartidas */
         .shared-list {
           border-left: 3px solid #1e88e5;
           padding-left: 8px;
@@ -1286,7 +1464,7 @@ export function ShoppingList() {
             padding: 20px;
           }
           
-          .list-creation, .item-input, .share-input {
+          .list-creation, .item-input-container, .share-input {
             flex-direction: column;
           }
           
@@ -1302,6 +1480,11 @@ export function ShoppingList() {
           
           .blue-button, .add-button {
             width: 100%;
+          }
+          
+          .category-select {
+            width: 100%;
+            min-width: auto;
           }
           
           .shared-users li {
@@ -1339,6 +1522,29 @@ export function ShoppingList() {
           
           .confirmation-modal, .share-modal {
             padding: 20px 15px;
+          }
+
+
+          .item-card.completed {
+            background-color: var(--completed-item);
+            opacity: 0.7; /* Hacerlos un poco transparentes */
+          }
+
+          /* Estilo para el encabezado de COMPRADO */
+          .completed-header {
+            margin-top: 20px;
+          }
+
+          /* Estilo para items completados */
+          .item-card.completed {
+            background-color: #f5f5f5;
+            opacity: 0.8;
+          }
+
+          /* Texto tachado */
+          .strikethrough {
+            text-decoration: line-through;
+            color: #9e9e9e;
           }
         }
       `}</style>
