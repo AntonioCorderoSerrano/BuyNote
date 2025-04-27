@@ -5,6 +5,7 @@ import { collection, addDoc, query, where, onSnapshot, deleteDoc, writeBatch, ge
 import { doc, updateDoc } from "firebase/firestore";
 import { signOut } from "firebase/auth";
 import { onAuthStateChanged } from "firebase/auth";
+import { BarcodeScanner } from '@ionic-native/barcode-scanner';
 
 export function ShoppingList() {
   const [items, setItems] = useState([]);
@@ -26,6 +27,143 @@ export function ShoppingList() {
   const [selectedCategory, setSelectedCategory] = useState("");
   const [sortByPurchased, setSortByPurchased] = useState(false);
   const allLists = [...lists, ...sharedLists];
+  const [isScanning, setIsScanning] = useState(false);
+  const [scanError, setScanError] = useState(null);
+  const scannerRef = useRef(null);
+  const [userPremium, setUserPremium] = useState(false);
+  const [paypalLoaded, setPaypalLoaded] = useState(false);
+  const [showPremiumModal, setShowPremiumModal] = useState(false);
+  const [adBlockDetected, setAdBlockDetected] = useState(false);
+
+
+  // Verificar si el usuario tiene premium
+  useEffect(() => {
+    const checkPremiumStatus = async (user) => {
+      if (!user) return;
+
+      try {
+        const userDoc = await getDoc(doc(db, "users", user.uid));
+        if (userDoc.exists() && userDoc.data().premium) {
+          setUserPremium(true);
+        }
+      } catch (err) {
+        console.error("Error checking premium status:", err);
+      }
+    };
+
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      if (user) {
+        setUserReady(true);
+        loadInitialData(user);
+        checkPremiumStatus(user);
+      } else {
+        setUserReady(false);
+        resetState();
+        setUserPremium(false);
+      }
+    });
+
+    return unsubscribe;
+  }, []);
+
+  // Cargar PayPal SDK
+  useEffect(() => {
+    if (!paypalLoaded && !userPremium) {
+      loadPaypalScript();
+    }
+  }, [paypalLoaded, userPremium]);
+
+  const loadPaypalScript = async () => {
+    try {
+      await loadScript({
+        "client-id": "AdT9pWzaT4MXaJuBE4ECgqLXcnD9kEqMxKUCrU8lGqD32B1XtzeqaPnmpzcuww3YArkAg2ZYCIIPIOIe",
+        currency: "EUR",
+        "disable-funding": "credit,card",
+      });
+      setPaypalLoaded(true);
+    } catch (error) {
+      console.error("Failed to load PayPal JS SDK script", error);
+    }
+  };
+
+  // Detectar AdBlock
+  useEffect(() => {
+    const checkAdBlock = () => {
+      const fakeAd = document.createElement('div');
+      fakeAd.className = 'ad-class';
+      fakeAd.style.height = '1px';
+      document.body.appendChild(fakeAd);
+
+      setTimeout(() => {
+        if (fakeAd.offsetHeight === 0) {
+          setAdBlockDetected(true);
+          if (!userPremium) {
+            alert("Hemos detectado un bloqueador de anuncios. Para usar la aplicación sin anuncios, considera actualizar a la versión premium.");
+          }
+        }
+        document.body.removeChild(fakeAd);
+      }, 100);
+    };
+
+    if (!userPremium) {
+      checkAdBlock();
+      const interval = setInterval(checkAdBlock, 30000); // Verificar cada 30 segundos
+      return () => clearInterval(interval);
+    }
+  }, [userPremium]);
+
+  // Mostrar anuncios si no es premium
+  useEffect(() => {
+    if (!userPremium && !adBlockDetected) {
+      // Inicializar anuncios
+      (window.adsbygoogle = window.adsbygoogle || []).push({});
+    }
+  }, [userPremium, adBlockDetected]);
+
+  // Función para suscribirse al plan premium
+  const handlePremiumSubscription = () => {
+    if (!paypalLoaded) return;
+
+    window.paypal.Buttons({
+      createSubscription: function (data, actions) {
+        return actions.subscription.create({
+          'plan_id': 'P-13U06603S35467107NAHJG5A' // ID de tu plan en PayPal
+        });
+      },
+      onApprove: async function (data, actions) {
+        try {
+          // Guardar la suscripción en Firestore
+          await updateDoc(doc(db, "users", auth.currentUser.uid), {
+            premium: true,
+            subscriptionId: data.subscriptionID,
+            premiumSince: new Date()
+          });
+
+          setUserPremium(true);
+          setShowPremiumModal(false);
+          alert("¡Gracias por suscribirte a la versión premium!");
+        } catch (err) {
+          console.error("Error saving premium status:", err);
+          alert("Hubo un error al activar tu suscripción. Por favor, contacta con soporte.");
+        }
+      },
+      onError: function (err) {
+        console.error("PayPal error:", err);
+        alert("Hubo un error al procesar el pago. Por favor, inténtalo de nuevo.");
+      }
+    }).render('#paypal-button-container');
+  };
+
+
+
+  // Limpiar el escáner al desmontar el componente
+  useEffect(() => {
+    return () => {
+      if (scannerRef.current) {
+        scannerRef.current.clear();
+      }
+    };
+  }, []);
 
   // Categorías disponibles
   const CATEGORIES = {
@@ -388,10 +526,14 @@ export function ShoppingList() {
   };
 
   const shareList = async () => {
+    if (!userPremium) {
+      setShowPremiumModal(true);
+      return;
+    }
+
     if (!currentList || !emailToShare.trim() || !auth.currentUser?.uid) return;
 
     try {
-      // Optimistic UI
       const tempSharedUsers = [...sharedUsers, emailToShare];
       setSharedUsers(tempSharedUsers);
 
@@ -507,6 +649,71 @@ export function ShoppingList() {
     return a.text.localeCompare(b.text);
   });
 
+
+
+  // Renderizar anuncios en el componente
+  const renderAds = () => {
+    if (userPremium || adBlockDetected) return null;
+
+    return (
+      <>
+        {/* Banner superior */}
+        <div className="ad-container top-ad">
+          <ins className="adsbygoogle"
+            style={{ display: 'block' }}
+            data-ad-client="ca-pub-2283199580734396"
+            data-ad-slot="TU_SLOT_BANNER_SUPERIOR"
+            data-ad-format="auto"
+            data-full-width-responsive="true"></ins>
+        </div>
+
+        {/* Banner lateral (solo en desktop) */}
+        <div className="ad-container side-ad">
+          <ins className="adsbygoogle"
+            style={{ display: 'block' }}
+            data-ad-client="ca-pub-2283199580734396"
+            data-ad-slot="TU_SLOT_BANNER_LATERAL"
+            data-ad-format="auto"
+            data-full-width-responsive="true"></ins>
+        </div>
+      </>
+    );
+  };
+
+  // Renderizar modal premium
+  const renderPremiumModal = () => {
+    if (!showPremiumModal) return null;
+
+    return (
+      <div className="modal-overlay">
+        <div className="premium-modal" style={{ backgroundColor: "white" }}>
+          <h3 style={{ color: "black" }}>Actualiza a Premium</h3>
+          <p style={{ color: "black" }}>
+            La función de compartir listas está disponible solo para usuarios premium.
+            Suscríbete por solo 4.99€/mes y disfruta de:
+          </p>
+          <ul style={{ color: "black", textAlign: "left", margin: "15px 0" }}>
+            <li>Compartir listas con otros usuarios</li>
+            <li>Experiencia sin anuncios</li>
+            <li>Soporte prioritario</li>
+            <li>Funciones exclusivas</li>
+          </ul>
+
+          <div id="paypal-button-container" style={{ margin: "20px 0" }}></div>
+
+          <button
+            onClick={() => setShowPremiumModal(false)}
+            className="cancel-btn"
+            style={{ color: "black" }}
+          >
+            Quizá más tarde
+          </button>
+        </div>
+      </div>
+    );
+  };
+
+
   if (loading) return (
     <div className="loading-screen">
       <div className="spinner"></div>
@@ -546,6 +753,8 @@ export function ShoppingList() {
           </svg>
         </button>
       </nav>
+
+      {renderAds()}
 
       <div className="main-content">
         <div className="content-card" style={{ backgroundColor: "rgba(255, 255, 255, 0.9)" }}>
@@ -806,7 +1015,7 @@ export function ShoppingList() {
                 {sortedItems.some(item => item.completed) && (
                   <>
                     <li className="category-header completed-header">
-                      <span style={{ color: "black"}}>COMPRADO</span>
+                      <span style={{ color: "black" }}>COMPRADO</span>
                     </li>
                     {sortedItems
                       .filter(item => item.completed)
@@ -845,6 +1054,8 @@ export function ShoppingList() {
           )}
         </div>
       </div>
+
+      {renderPremiumModal()}
 
       {confirmDelete && (
         <div className="modal-overlay">
@@ -894,6 +1105,8 @@ export function ShoppingList() {
               </button>
             </div>
           </div>
+          <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-4336614010144487"
+            crossorigin="anonymous"></script>
         </div>
       )}
 
@@ -1545,6 +1758,63 @@ export function ShoppingList() {
           .strikethrough {
             text-decoration: line-through;
             color: #9e9e9e;
+          }
+
+          /* Nuevos estilos para anuncios y premium */
+        .ad-container {
+          margin: 15px auto;
+          text-align: center;
+          overflow: hidden;
+        }
+        
+        .top-ad {
+          width: 100%;
+          max-width: 728px;
+          height: 90px;
+        }
+        
+        .side-ad {
+          position: fixed;
+          right: 20px;
+          top: 50%;
+          transform: translateY(-50%);
+          width: 160px;
+          height: 600px;
+          display: none;
+        }
+        
+        .premium-modal {
+          max-width: 500px;
+          padding: 30px;
+          text-align: center;
+        }
+        
+        .premium-btn {
+          transition: all 0.3s ease;
+          cursor: pointer;
+        }
+        
+        .premium-btn:hover {
+          transform: scale(1.05);
+          box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+        }
+        
+        .navbar-actions {
+          display: flex;
+          align-items: center;
+        }
+        
+        @media (min-width: 1200px) {
+          .side-ad {
+            display: block;
+          }
+        }
+        
+        @media (max-width: 768px) {
+          .premium-btn {
+            padding: 6px 12px;
+            font-size: 0.9rem;
+            margin-right: 10px;
           }
         }
       `}</style>

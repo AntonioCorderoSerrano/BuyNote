@@ -9,12 +9,18 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@capacitor-community/barcode-scanner": "^4.0.1",
+    "@ionic-native/barcode-scanner": "^5.36.0",
+    "@ionic-native/core": "^5.36.0",
+    "@paypal/paypal-js": "^8.2.0",
     "firebase": "^11.6.0",
     "framer-motion": "^12.6.5",
+    "html5-qrcode": "^2.3.8",
     "next": "15.3.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "react-icons": "^5.5.0"
+    "react-icons": "^5.5.0",
+    "react-qr-barcode-scanner": "^2.1.0"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
