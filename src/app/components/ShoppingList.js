@@ -728,6 +728,10 @@ export function ShoppingList() {
     </div>
   );
 
+  <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-4336614010144487"
+    crossorigin="anonymous"></script>
+
+
   return (
     <div className="app-container">
       <nav className="app-navbar" style={{ backgroundColor: "rgba(255, 255, 255, 0.9)" }}>
@@ -1105,8 +1109,6 @@ export function ShoppingList() {
               </button>
             </div>
           </div>
-          <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-4336614010144487"
-            crossorigin="anonymous"></script>
         </div>
       )}
 
