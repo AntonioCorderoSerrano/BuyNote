@@ -5,9 +5,10 @@ import { collection, addDoc, query, where, onSnapshot, deleteDoc, writeBatch, ge
 import { doc, updateDoc } from "firebase/firestore";
 import { signOut } from "firebase/auth";
 import { onAuthStateChanged } from "firebase/auth";
-import { BarcodeScanner } from '@ionic-native/barcode-scanner';
+import { loadScript } from "@paypal/paypal-js";
 
 export function ShoppingList() {
+  const modalRef = useRef(null);
   const [items, setItems] = useState([]);
   const [newItem, setNewItem] = useState("");
   const [lists, setLists] = useState([]);
@@ -24,17 +25,74 @@ export function ShoppingList() {
   const [unshareDialogOpen, setUnshareDialogOpen] = useState(false);
   const [userToUnshare, setUserToUnshare] = useState("");
   const [userReady, setUserReady] = useState(false);
-  const [selectedCategory, setSelectedCategory] = useState("");
-  const [sortByPurchased, setSortByPurchased] = useState(false);
   const allLists = [...lists, ...sharedLists];
-  const [isScanning, setIsScanning] = useState(false);
-  const [scanError, setScanError] = useState(null);
   const scannerRef = useRef(null);
   const [userPremium, setUserPremium] = useState(false);
   const [paypalLoaded, setPaypalLoaded] = useState(false);
   const [showPremiumModal, setShowPremiumModal] = useState(false);
   const [adBlockDetected, setAdBlockDetected] = useState(false);
+  const [paypalButtonReady, setPaypalButtonReady] = useState(false);
 
+
+  useEffect(() => {
+    if (showPremiumModal && modalRef.current) {
+      // Enfocar el modal cuando se muestra
+      modalRef.current.focus();
+
+      // Guardar el elemento que tenía el foco antes
+      const previousActiveElement = document.activeElement;
+
+      // Manejar el tab para mantener el foco dentro del modal
+      const handleTabKey = (e) => {
+        if (e.key === 'Tab') {
+          const focusableElements = modalRef.current.querySelectorAll(
+            'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+          );
+
+          const firstElement = focusableElements[0];
+          const lastElement = focusableElements[focusableElements.length - 1];
+
+          if (!e.shiftKey && document.activeElement === lastElement) {
+            firstElement.focus();
+            e.preventDefault();
+          }
+
+          if (e.shiftKey && document.activeElement === firstElement) {
+            lastElement.focus();
+            e.preventDefault();
+          }
+        }
+      };
+
+      const handleEscape = (e) => {
+        if (e.key === 'Escape') {
+          setShowPremiumModal(false);
+        }
+      };
+
+      modalRef.current.addEventListener('keydown', handleTabKey);
+      modalRef.current.addEventListener('keydown', handleEscape);
+
+      return () => {
+        modalRef.current.removeEventListener('keydown', handleTabKey);
+        modalRef.current.removeEventListener('keydown', handleEscape);
+        // Restaurar el foco al elemento anterior al cerrar el modal
+        if (previousActiveElement) {
+          previousActiveElement.focus();
+        }
+      };
+    }
+  }, [showPremiumModal]);
+
+  useEffect(() => {
+    if (showPremiumModal && paypalLoaded) {
+      const timer = setTimeout(() => {
+        renderPaypalButton();
+      }, 500); // Small delay to ensure DOM is ready
+  
+      return () => clearTimeout(timer);
+    }
+  }, [showPremiumModal, paypalLoaded]);
 
   // Verificar si el usuario tiene premium
   useEffect(() => {
@@ -79,10 +137,70 @@ export function ShoppingList() {
         "client-id": "AdT9pWzaT4MXaJuBE4ECgqLXcnD9kEqMxKUCrU8lGqD32B1XtzeqaPnmpzcuww3YArkAg2ZYCIIPIOIe",
         currency: "EUR",
         "disable-funding": "credit,card",
+        vault: true,
+        intent: "subscription",
+        "data-sdk-integration-source": "integrationbuilder_sc" // Add this line
       });
       setPaypalLoaded(true);
     } catch (error) {
       console.error("Failed to load PayPal JS SDK script", error);
+      // Retry after delay
+      setTimeout(() => loadPaypalScript(), 2000);
+    }
+  };
+
+  const renderPaypalButton = () => {
+    if (!window.paypal) {
+      console.error("PayPal SDK not loaded");
+      return;
+    }
+  
+    const container = document.getElementById('paypal-button-container');
+    if (!container) return;
+  
+    // Clear previous buttons
+    container.innerHTML = '';
+  
+    try {
+      window.paypal.Buttons({
+        style: {
+          shape: 'rect',
+          color: 'gold',
+          layout: 'vertical',
+          label: 'subscribe'
+        },
+        createSubscription: (data, actions) => {
+          return actions.subscription.create({
+            plan_id: 'P-13U06603S35467107NAHJG5A'
+          });
+        },
+        onApprove: async (data, actions) => {
+          try {
+            await updateDoc(doc(db, "users", auth.currentUser.uid), {
+              premium: true,
+              subscriptionId: data.subscriptionID,
+              premiumSince: new Date()
+            });
+            setUserPremium(true);
+            setShowPremiumModal(false);
+            alert("¡Gracias por suscribirte a la versión premium!");
+          } catch (err) {
+            console.error("Error saving premium status:", err);
+            alert("Hubo un error al activar tu suscripción. Por favor, contacta con soporte.");
+          }
+        },
+        onError: (err) => {
+          console.error("PayPal error:", err);
+          alert(`Error en el pago: ${err.message || "Por favor, inténtalo de nuevo"}`);
+        },
+        onCancel: (data) => {
+          console.log("Subscription canceled:", data);
+        }
+      }).render('#paypal-button-container');
+    } catch (err) {
+      console.error("Error rendering PayPal button:", err);
+      container.innerHTML = '<p>Error al cargar el botón de PayPal. Recargando...</p>';
+      setTimeout(() => window.location.reload(), 2000);
     }
   };
 
@@ -120,41 +238,84 @@ export function ShoppingList() {
     }
   }, [userPremium, adBlockDetected]);
 
-  // Función para suscribirse al plan premium
+  // Modificar el useEffect de PayPal para manejar el botón
+  useEffect(() => {
+    if (!paypalLoaded && !userPremium) {
+      loadPaypalScript().then(() => {
+        setPaypalButtonReady(true);
+      });
+    }
+  }, [paypalLoaded, userPremium]);
+
+  // Función para manejar la suscripción premium
   const handlePremiumSubscription = () => {
-    if (!paypalLoaded) return;
-
-    window.paypal.Buttons({
-      createSubscription: function (data, actions) {
-        return actions.subscription.create({
-          'plan_id': 'P-13U06603S35467107NAHJG5A' // ID de tu plan en PayPal
-        });
-      },
-      onApprove: async function (data, actions) {
-        try {
-          // Guardar la suscripción en Firestore
-          await updateDoc(doc(db, "users", auth.currentUser.uid), {
-            premium: true,
-            subscriptionId: data.subscriptionID,
-            premiumSince: new Date()
-          });
-
-          setUserPremium(true);
-          setShowPremiumModal(false);
-          alert("¡Gracias por suscribirte a la versión premium!");
-        } catch (err) {
-          console.error("Error saving premium status:", err);
-          alert("Hubo un error al activar tu suscripción. Por favor, contacta con soporte.");
-        }
-      },
-      onError: function (err) {
-        console.error("PayPal error:", err);
-        alert("Hubo un error al procesar el pago. Por favor, inténtalo de nuevo.");
-      }
-    }).render('#paypal-button-container');
+    setShowPremiumModal(true);
+    
+    if (!paypalLoaded) {
+      loadPaypalScript().then(() => {
+        setPaypalButtonReady(true);
+      }).catch(err => {
+        console.error("Failed to load PayPal:", err);
+        alert("No se pudo cargar PayPal. Por favor, recarga la página.");
+      });
+    }
   };
 
+  // En el return, reemplazar {renderPremiumModal()} con:
+  {
+    showPremiumModal && (
+      <div className="modal-overlay">
+        <div className="floating-modal" tabIndex="-1" ref={modalRef}>
+          <div className="modal-header">
+            <h3>Actualiza a BuyNote Premium</h3>
+            <button
+              onClick={() => setShowPremiumModal(false)}
+              className="close-modal-btn"
+              aria-label="Cerrar modal"
+            >
+              ×
+            </button>
+          </div>
 
+          <div className="modal-content">
+            <div className="premium-features">
+              <div className="feature">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="#4CAF50" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M9 16.17L4.83 12L3.41 13.41L9 19L21 7L19.59 5.59L9 16.17Z" />
+                </svg>
+                <span>Compartir listas con otros usuarios</span>
+              </div>
+              <div className="feature">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="#4CAF50" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M9 16.17L4.83 12L3.41 13.41L9 19L21 7L19.59 5.59L9 16.17Z" />
+                </svg>
+                <span>Experiencia sin anuncios</span>
+              </div>
+              <div className="feature">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="#4CAF50" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M9 16.17L4.83 12L3.41 13.41L9 19L21 7L19.59 5.59L9 16.17Z" />
+                </svg>
+                <span>Soporte prioritario</span>
+              </div>
+            </div>
+
+            <div className="pricing">
+              <h4>Solo 4.99€/mes</h4>
+              <p>Cancelación en cualquier momento</p>
+            </div>
+
+            <div id="paypal-button-container" className="paypal-container">
+              {!paypalButtonReady && <p>Cargando opciones de pago...</p>}
+            </div>
+
+            <p className="secure-payment">
+              El pago se procesa de forma segura a través de PayPal
+            </p>
+          </div>
+        </div>
+      </div>
+    )
+  }
 
   // Limpiar el escáner al desmontar el componente
   useEffect(() => {
@@ -662,7 +823,6 @@ export function ShoppingList() {
           <ins className="adsbygoogle"
             style={{ display: 'block' }}
             data-ad-client="ca-pub-2283199580734396"
-            data-ad-slot="TU_SLOT_BANNER_SUPERIOR"
             data-ad-format="auto"
             data-full-width-responsive="true"></ins>
         </div>
@@ -672,7 +832,6 @@ export function ShoppingList() {
           <ins className="adsbygoogle"
             style={{ display: 'block' }}
             data-ad-client="ca-pub-2283199580734396"
-            data-ad-slot="TU_SLOT_BANNER_LATERAL"
             data-ad-format="auto"
             data-full-width-responsive="true"></ins>
         </div>
@@ -744,18 +903,33 @@ export function ShoppingList() {
             style={{ objectFit: 'contain' }}
           />
           <span className="app-name" style={{ color: "black" }}>BuyNote</span>
+          {userPremium && (
+            <span className="premium-badge">PREMIUM</span>
+          )}
         </div>
-        <button
-          className="logout-btn"
-          onClick={() => signOut(auth)}
-          title="Cerrar sesión"
-        >
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <path d="M9 21H5C4.46957 21 3.96086 20.7893 3.58579 20.4142C3.21071 20.0391 3 19.5304 3 19V5C3 4.46957 3.21071 3.96086 3.58579 3.58579C3.96086 3.21071 4.46957 3 5 3H9" stroke="#1e88e5" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-            <path d="M16 17L21 12L16 7" stroke="#1e88e5" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-            <path d="M21 12H9" stroke="#1e88e5" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-        </button>
+
+        <div className="navbar-actions">
+          {!userPremium && (
+            <button
+              onClick={handlePremiumSubscription}
+              className="premium-btn"
+              disabled={!paypalButtonReady}
+            >
+              {paypalButtonReady ? 'Obtener Premium' : 'Cargando...'}
+            </button>
+          )}
+          <button
+            className="logout-btn"
+            onClick={() => signOut(auth)}
+            title="Cerrar sesión"
+          >
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M9 21H5C4.46957 21 3.96086 20.7893 3.58579 20.4142C3.21071 20.0391 3 19.5304 3 19V5C3 4.46957 3.21071 3.96086 3.58579 3.58579C3.96086 3.21071 4.46957 3 5 3H9" stroke="#1e88e5" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+              <path d="M16 17L21 12L16 7" stroke="#1e88e5" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+              <path d="M21 12H9" stroke="#1e88e5" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </button>
+        </div>
       </nav>
 
       {renderAds()}
@@ -1818,7 +1992,146 @@ export function ShoppingList() {
             font-size: 0.9rem;
             margin-right: 10px;
           }
-        }
+
+
+        .modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 20px;
+  backdrop-filter: blur(5px);
+}
+
+.floating-modal {
+  background-color: white;
+  border-radius: 12px;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
+  width: 100%;
+  max-width: 500px;
+  overflow: hidden;
+  animation: modalFadeIn 0.3s ease-out;
+  margin: 20px; /* Márgenes en todos los lados */
+  max-height: 90vh; /* Altura máxima */
+  overflow-y: auto; /* Scroll si el contenido es muy largo */
+  position: relative; /* Para posicionar elementos internos */
+}
+
+@keyframes modalFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 20px;
+  background-color: #f8f9fa;
+  border-bottom: 1px solid #e9ecef;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.modal-header h3 {
+  margin: 0;
+  color: #212529;
+  font-size: 1.5rem;
+}
+
+.close-modal-btn {
+  background: none;
+  border: none;
+  font-size: 1.5rem;
+  cursor: pointer;
+  color: #6c757d;
+  padding: 0 10px;
+  transition: color 0.2s;
+}
+
+.close-modal-btn:hover {
+  color: #495057;
+}
+
+.modal-content {
+  padding: 20px;
+}
+
+.premium-features {
+  margin-bottom: 20px;
+}
+
+.feature {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+  color: #212529;
+}
+
+.pricing {
+  text-align: center;
+  margin: 20px 0;
+}
+
+.pricing h4 {
+  font-size: 1.3rem;
+  color: #28a745;
+  margin-bottom: 5px;
+}
+
+.pricing p {
+  color: #6c757d;
+  font-size: 0.9rem;
+}
+
+.paypal-container {
+  margin: 20px 0;
+  min-height: 45px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.secure-payment {
+  text-align: center;
+  color: #6c757d;
+  font-size: 0.8rem;
+  margin-top: 10px;
+}
+
+@media (max-width: 576px) {
+  .floating-modal {
+    margin: 10px;
+    max-width: calc(100% - 20px); /* Asegura que no toque los bordes */
+  }
+  
+  .modal-header {
+    padding: 15px;
+  }
+  
+  .modal-header h3 {
+    font-size: 1.3rem;
+  }
+  
+  .modal-content {
+    padding: 15px;
+  }
+}
+}
       `}</style>
     </div>
   );
