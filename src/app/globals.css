@@ -41,7 +41,7 @@ html, body, * {
   will-change: transform;
   user-select: none;
   -webkit-user-select: none;
-  background-image: url("/compra.png"); /* Usa solo una imagen */
+  background-image: url("/compra.png");
   background-repeat: no-repeat;
   background-size: contain;
   background-position: center;

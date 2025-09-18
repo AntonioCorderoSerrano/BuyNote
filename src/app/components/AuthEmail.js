@@ -17,7 +17,6 @@ export function AuthEmail() {
   const handleSubmit = async (e) => {
     e.preventDefault();
     
-    // Validación mejorada
     if (!email.trim()) {
       setError("Por favor ingresa tu correo electrónico");
       return;
@@ -37,7 +36,7 @@ export function AuthEmail() {
       setLoading(true);
       setError(null);
   
-      console.log("Intentando autenticar con:", { email, isLogin }); // Log sin password por seguridad
+      console.log("Intentando autenticar con:", { email, isLogin });
   
       if (isLogin) {
         await signInWithEmailAndPassword(auth, email, password);

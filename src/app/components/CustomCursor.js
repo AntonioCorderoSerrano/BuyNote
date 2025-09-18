@@ -9,7 +9,6 @@ export default function CustomCursor() {
   const [clickAnimation, setClickAnimation] = useState(false);
 
   useEffect(() => {
-    // Pequeño retraso para evitar parpadeo inicial
     const timer = setTimeout(() => {
       setIsVisible(true);
     }, 100);
@@ -95,7 +94,6 @@ export default function CustomCursor() {
 
   return (
     <>
-      {/* Efecto de click (ondas concéntricas) - SOLO cuando se hace clic en elementos interactivos */}
       {clickAnimation && (
         <div 
           className="custom-cursor-click-effect"
@@ -107,7 +105,6 @@ export default function CustomCursor() {
         />
       )}
       
-      {/* Cursor principal */}
       <div 
         className={cursorClass}
         style={{

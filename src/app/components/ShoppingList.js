@@ -204,63 +204,6 @@ export function ShoppingList() {
     }
   };
 
-  // Detectar AdBlock
-  useEffect(() => {
-    const checkAdBlock = () => {
-      const fakeAd = document.createElement('div');
-      fakeAd.className = 'ad-class';
-      fakeAd.style.height = '1px';
-      document.body.appendChild(fakeAd);
-
-      setTimeout(() => {
-        if (fakeAd.offsetHeight === 0) {
-          setAdBlockDetected(true);
-          if (!userPremium) {
-            alert("Hemos detectado un bloqueador de anuncios. Para usar la aplicación sin anuncios, considera actualizar a la versión premium.");
-          }
-        }
-        document.body.removeChild(fakeAd);
-      }, 100);
-    };
-
-    if (!userPremium) {
-      checkAdBlock();
-      const interval = setInterval(checkAdBlock, 30000); // Verificar cada 30 segundos
-      return () => clearInterval(interval);
-    }
-  }, [userPremium]);
-
-  // Mostrar anuncios si no es premium
-  useEffect(() => {
-    if (!userPremium && !adBlockDetected) {
-      // Inicializar anuncios
-      (window.adsbygoogle = window.adsbygoogle || []).push({});
-    }
-  }, [userPremium, adBlockDetected]);
-
-  // Modificar el useEffect de PayPal para manejar el botón
-  useEffect(() => {
-    if (!paypalLoaded && !userPremium) {
-      loadPaypalScript().then(() => {
-        setPaypalButtonReady(true);
-      });
-    }
-  }, [paypalLoaded, userPremium]);
-
-  // Función para manejar la suscripción premium
-  const handlePremiumSubscription = () => {
-    setShowPremiumModal(true);
-    
-    if (!paypalLoaded) {
-      loadPaypalScript().then(() => {
-        setPaypalButtonReady(true);
-      }).catch(err => {
-        console.error("Failed to load PayPal:", err);
-        alert("No se pudo cargar PayPal. Por favor, recarga la página.");
-      });
-    }
-  };
-
   // En el return, reemplazar {renderPremiumModal()} con:
   {
     showPremiumModal && (
@@ -909,15 +852,6 @@ export function ShoppingList() {
         </div>
 
         <div className="navbar-actions">
-          {!userPremium && (
-            <button
-              onClick={handlePremiumSubscription}
-              className="premium-btn"
-              disabled={!paypalButtonReady}
-            >
-              {paypalButtonReady ? 'Obtener Premium' : 'Cargando...'}
-            </button>
-          )}
           <button
             className="logout-btn"
             onClick={() => signOut(auth)}
