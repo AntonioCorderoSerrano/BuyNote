@@ -3,12 +3,9 @@ import { useState, useEffect, useRef } from "react";
 import { db, auth } from "../firebase";
 import { collection, addDoc, query, where, onSnapshot, deleteDoc, writeBatch, getDocs, arrayUnion, arrayRemove, getDoc } from "firebase/firestore";
 import { doc, updateDoc } from "firebase/firestore";
-import { signOut } from "firebase/auth";
-import { onAuthStateChanged } from "firebase/auth";
-import { loadScript } from "@paypal/paypal-js";
+import { signOut, onAuthStateChanged, fetchSignInMethodsForEmail } from "firebase/auth";
 
 export function ShoppingList() {
-  const modalRef = useRef(null);
   const [items, setItems] = useState([]);
   const [newItem, setNewItem] = useState("");
   const [lists, setLists] = useState([]);
@@ -25,240 +22,12 @@ export function ShoppingList() {
   const [unshareDialogOpen, setUnshareDialogOpen] = useState(false);
   const [userToUnshare, setUserToUnshare] = useState("");
   const [userReady, setUserReady] = useState(false);
+  const [emailValidation, setEmailValidation] = useState({ valid: true, message: "" });
+
   const allLists = [...lists, ...sharedLists];
   const scannerRef = useRef(null);
-  const [userPremium, setUserPremium] = useState(false);
-  const [paypalLoaded, setPaypalLoaded] = useState(false);
-  const [showPremiumModal, setShowPremiumModal] = useState(false);
-  const [adBlockDetected, setAdBlockDetected] = useState(false);
-  const [paypalButtonReady, setPaypalButtonReady] = useState(false);
-
-
-  useEffect(() => {
-    if (showPremiumModal && modalRef.current) {
-      // Enfocar el modal cuando se muestra
-      modalRef.current.focus();
-
-      // Guardar el elemento que tenía el foco antes
-      const previousActiveElement = document.activeElement;
-
-      // Manejar el tab para mantener el foco dentro del modal
-      const handleTabKey = (e) => {
-        if (e.key === 'Tab') {
-          const focusableElements = modalRef.current.querySelectorAll(
-            'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
-          );
-
-          const firstElement = focusableElements[0];
-          const lastElement = focusableElements[focusableElements.length - 1];
-
-          if (!e.shiftKey && document.activeElement === lastElement) {
-            firstElement.focus();
-            e.preventDefault();
-          }
-
-          if (e.shiftKey && document.activeElement === firstElement) {
-            lastElement.focus();
-            e.preventDefault();
-          }
-        }
-      };
-
-      const handleEscape = (e) => {
-        if (e.key === 'Escape') {
-          setShowPremiumModal(false);
-        }
-      };
-
-      modalRef.current.addEventListener('keydown', handleTabKey);
-      modalRef.current.addEventListener('keydown', handleEscape);
-
-      return () => {
-        modalRef.current.removeEventListener('keydown', handleTabKey);
-        modalRef.current.removeEventListener('keydown', handleEscape);
-        // Restaurar el foco al elemento anterior al cerrar el modal
-        if (previousActiveElement) {
-          previousActiveElement.focus();
-        }
-      };
-    }
-  }, [showPremiumModal]);
-
-  useEffect(() => {
-    if (showPremiumModal && paypalLoaded) {
-      const timer = setTimeout(() => {
-        renderPaypalButton();
-      }, 500); // Small delay to ensure DOM is ready
-  
-      return () => clearTimeout(timer);
-    }
-  }, [showPremiumModal, paypalLoaded]);
-
-  // Verificar si el usuario tiene premium
-  useEffect(() => {
-    const checkPremiumStatus = async (user) => {
-      if (!user) return;
-
-      try {
-        const userDoc = await getDoc(doc(db, "users", user.uid));
-        if (userDoc.exists() && userDoc.data().premium) {
-          setUserPremium(true);
-        }
-      } catch (err) {
-        console.error("Error checking premium status:", err);
-      }
-    };
-
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
-      if (user) {
-        setUserReady(true);
-        loadInitialData(user);
-        checkPremiumStatus(user);
-      } else {
-        setUserReady(false);
-        resetState();
-        setUserPremium(false);
-      }
-    });
-
-    return unsubscribe;
-  }, []);
-
-  // Cargar PayPal SDK
-  useEffect(() => {
-    if (!paypalLoaded && !userPremium) {
-      loadPaypalScript();
-    }
-  }, [paypalLoaded, userPremium]);
-
-  const loadPaypalScript = async () => {
-    try {
-      await loadScript({
-        "client-id": "AdT9pWzaT4MXaJuBE4ECgqLXcnD9kEqMxKUCrU8lGqD32B1XtzeqaPnmpzcuww3YArkAg2ZYCIIPIOIe",
-        currency: "EUR",
-        "disable-funding": "credit,card",
-        vault: true,
-        intent: "subscription",
-        "data-sdk-integration-source": "integrationbuilder_sc" // Add this line
-      });
-      setPaypalLoaded(true);
-    } catch (error) {
-      console.error("Failed to load PayPal JS SDK script", error);
-      // Retry after delay
-      setTimeout(() => loadPaypalScript(), 2000);
-    }
-  };
-
-  const renderPaypalButton = () => {
-    if (!window.paypal) {
-      console.error("PayPal SDK not loaded");
-      return;
-    }
-  
-    const container = document.getElementById('paypal-button-container');
-    if (!container) return;
-  
-    // Clear previous buttons
-    container.innerHTML = '';
-  
-    try {
-      window.paypal.Buttons({
-        style: {
-          shape: 'rect',
-          color: 'gold',
-          layout: 'vertical',
-          label: 'subscribe'
-        },
-        createSubscription: (data, actions) => {
-          return actions.subscription.create({
-            plan_id: 'P-13U06603S35467107NAHJG5A'
-          });
-        },
-        onApprove: async (data, actions) => {
-          try {
-            await updateDoc(doc(db, "users", auth.currentUser.uid), {
-              premium: true,
-              subscriptionId: data.subscriptionID,
-              premiumSince: new Date()
-            });
-            setUserPremium(true);
-            setShowPremiumModal(false);
-            alert("¡Gracias por suscribirte a la versión premium!");
-          } catch (err) {
-            console.error("Error saving premium status:", err);
-            alert("Hubo un error al activar tu suscripción. Por favor, contacta con soporte.");
-          }
-        },
-        onError: (err) => {
-          console.error("PayPal error:", err);
-          alert(`Error en el pago: ${err.message || "Por favor, inténtalo de nuevo"}`);
-        },
-        onCancel: (data) => {
-          console.log("Subscription canceled:", data);
-        }
-      }).render('#paypal-button-container');
-    } catch (err) {
-      console.error("Error rendering PayPal button:", err);
-      container.innerHTML = '<p>Error al cargar el botón de PayPal. Recargando...</p>';
-      setTimeout(() => window.location.reload(), 2000);
-    }
-  };
-
-  // En el return, reemplazar {renderPremiumModal()} con:
-  {
-    showPremiumModal && (
-      <div className="modal-overlay">
-        <div className="floating-modal" tabIndex="-1" ref={modalRef}>
-          <div className="modal-header">
-            <h3>Actualiza a BuyNote Premium</h3>
-            <button
-              onClick={() => setShowPremiumModal(false)}
-              className="close-modal-btn"
-              aria-label="Cerrar modal"
-            >
-              ×
-            </button>
-          </div>
-
-          <div className="modal-content">
-            <div className="premium-features">
-              <div className="feature">
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="#4CAF50" xmlns="http://www.w3.org/2000/svg">
-                  <path d="M9 16.17L4.83 12L3.41 13.41L9 19L21 7L19.59 5.59L9 16.17Z" />
-                </svg>
-                <span>Compartir listas con otros usuarios</span>
-              </div>
-              <div className="feature">
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="#4CAF50" xmlns="http://www.w3.org/2000/svg">
-                  <path d="M9 16.17L4.83 12L3.41 13.41L9 19L21 7L19.59 5.59L9 16.17Z" />
-                </svg>
-                <span>Experiencia sin anuncios</span>
-              </div>
-              <div className="feature">
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="#4CAF50" xmlns="http://www.w3.org/2000/svg">
-                  <path d="M9 16.17L4.83 12L3.41 13.41L9 19L21 7L19.59 5.59L9 16.17Z" />
-                </svg>
-                <span>Soporte prioritario</span>
-              </div>
-            </div>
-
-            <div className="pricing">
-              <h4>Solo 4.99€/mes</h4>
-              <p>Cancelación en cualquier momento</p>
-            </div>
-
-            <div id="paypal-button-container" className="paypal-container">
-              {!paypalButtonReady && <p>Cargando opciones de pago...</p>}
-            </div>
-
-            <p className="secure-payment">
-              El pago se procesa de forma segura a través de PayPal
-            </p>
-          </div>
-        </div>
-      </div>
-    )
-  }
+  const itemsCache = useRef({});
+  const listsCache = useRef({ userLists: [], sharedLists: [] });
 
   // Limpiar el escáner al desmontar el componente
   useEffect(() => {
@@ -341,10 +110,6 @@ export function ShoppingList() {
     }
     return "OTHER"; // Categoría por defecto si no coincide con ninguna
   };
-
-  // Referencias para mantener datos entre renders sin recargar
-  const itemsCache = useRef({});
-  const listsCache = useRef({ userLists: [], sharedLists: [] });
 
   useEffect(() => {
     const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
@@ -629,31 +394,6 @@ export function ShoppingList() {
     setShareDialogOpen(true);
   };
 
-  const shareList = async () => {
-    if (!userPremium) {
-      setShowPremiumModal(true);
-      return;
-    }
-
-    if (!currentList || !emailToShare.trim() || !auth.currentUser?.uid) return;
-
-    try {
-      const tempSharedUsers = [...sharedUsers, emailToShare];
-      setSharedUsers(tempSharedUsers);
-
-      await updateDoc(doc(db, "lists", currentList), {
-        sharedWith: arrayUnion(emailToShare)
-      });
-
-      setEmailToShare("");
-      setShareDialogOpen(false);
-    } catch (err) {
-      console.error("Error compartiendo lista:", err);
-      setSharedUsers(sharedUsers.filter(email => email !== emailToShare));
-      setError(`Error al compartir: ${err.message}`);
-    }
-  };
-
   const unshareList = async () => {
     if (!currentList || !userToUnshare) return;
 
@@ -738,6 +478,15 @@ export function ShoppingList() {
     }
   };
 
+  const getCurrentListName = () => {
+    const list = allLists.find(list => list.id === currentList);
+    return list ? list.name : "";
+  };
+
+  const isCurrentListShared = () => {
+    return sharedLists.some(list => list.id === currentList);
+  };
+
   const sortedItems = [...items].sort((a, b) => {
     // Primero separar por completado (no completados primero)
     if (a.completed !== b.completed) {
@@ -753,68 +502,109 @@ export function ShoppingList() {
     return a.text.localeCompare(b.text);
   });
 
+  const checkUserExists = async (email) => {
+    try {
+      await new Promise(resolve => setTimeout(resolve, 1000));
 
+      // Validación básica de formato
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(email)) {
+        return false;
+      }
 
-  // Renderizar anuncios en el componente
-  const renderAds = () => {
-    if (userPremium || adBlockDetected) return null;
+      // Aceptamos cualquier email con formato válido
+      return true;
 
-    return (
-      <>
-        {/* Banner superior */}
-        <div className="ad-container top-ad">
-          <ins className="adsbygoogle"
-            style={{ display: 'block' }}
-            data-ad-client="ca-pub-2283199580734396"
-            data-ad-format="auto"
-            data-full-width-responsive="true"></ins>
-        </div>
-
-        {/* Banner lateral (solo en desktop) */}
-        <div className="ad-container side-ad">
-          <ins className="adsbygoogle"
-            style={{ display: 'block' }}
-            data-ad-client="ca-pub-2283199580734396"
-            data-ad-format="auto"
-            data-full-width-responsive="true"></ins>
-        </div>
-      </>
-    );
+    } catch (error) {
+      console.error("Error en verificación:", error);
+      return true;
+    }
   };
 
-  // Renderizar modal premium
-  const renderPremiumModal = () => {
-    if (!showPremiumModal) return null;
-
-    return (
-      <div className="modal-overlay">
-        <div className="premium-modal" style={{ backgroundColor: "white" }}>
-          <h3 style={{ color: "black" }}>Actualiza a Premium</h3>
-          <p style={{ color: "black" }}>
-            La función de compartir listas está disponible solo para usuarios premium.
-            Suscríbete por solo 4.99€/mes y disfruta de:
-          </p>
-          <ul style={{ color: "black", textAlign: "left", margin: "15px 0" }}>
-            <li>Compartir listas con otros usuarios</li>
-            <li>Experiencia sin anuncios</li>
-            <li>Soporte prioritario</li>
-            <li>Funciones exclusivas</li>
-          </ul>
-
-          <div id="paypal-button-container" style={{ margin: "20px 0" }}></div>
-
-          <button
-            onClick={() => setShowPremiumModal(false)}
-            className="cancel-btn"
-            style={{ color: "black" }}
-          >
-            Quizá más tarde
-          </button>
-        </div>
-      </div>
-    );
+  // Función para validar formato de email
+  const isValidEmail = (email) => {
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    return emailRegex.test(email);
   };
 
+  const shareList = async () => {
+    if (!currentList || !emailToShare.trim() || !auth.currentUser?.uid) return;
+
+    // Resetear validación
+    setEmailValidation({ valid: true, message: "" });
+
+    // Validar formato de email
+    if (!isValidEmail(emailToShare.trim())) {
+      setEmailValidation({
+        valid: false,
+        message: "Formato de email inválido"
+      });
+      return;
+    }
+
+    // No permitir compartir con uno mismo
+    if (emailToShare.trim().toLowerCase() === auth.currentUser.email.toLowerCase()) {
+      setEmailValidation({
+        valid: false,
+        message: "No puedes compartir la lista contigo mismo"
+      });
+      return;
+    }
+
+    // Verificar si ya está compartido
+    if (sharedUsers.includes(emailToShare.trim().toLowerCase())) {
+      setEmailValidation({
+        valid: false,
+        message: "Esta lista ya está compartida con este usuario"
+      });
+      return;
+    }
+
+    try {
+      setLoading(true);
+
+      // Verificar si el usuario existe en Firebase Auth
+      const userExists = await checkUserExists(emailToShare.trim());
+
+      if (!userExists) {
+        setEmailValidation({
+          valid: false,
+          message: "No se encontró un usuario con este email"
+        });
+        return;
+      }
+
+      // Si pasa todas las validaciones, proceder a compartir
+      const tempSharedUsers = [...sharedUsers, emailToShare.trim().toLowerCase()];
+      setSharedUsers(tempSharedUsers);
+
+      await updateDoc(doc(db, "lists", currentList), {
+        sharedWith: arrayUnion(emailToShare.trim().toLowerCase())
+      });
+
+      setEmailToShare("");
+      setEmailValidation({ valid: true, message: "¡Lista compartida exitosamente!" });
+
+      // Limpiar mensaje de éxito después de 3 segundos
+      setTimeout(() => {
+        setEmailValidation({ valid: true, message: "" });
+        setShareDialogOpen(false);
+      }, 3000);
+
+    } catch (err) {
+      console.error("Error compartiendo lista:", err);
+
+      // Revertir cambios en caso de error
+      setSharedUsers(sharedUsers.filter(email => email !== emailToShare.trim().toLowerCase()));
+
+      setEmailValidation({
+        valid: false,
+        message: `Error al compartir: ${err.message}`
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
 
   if (loading) return (
     <div className="loading-screen">
@@ -830,10 +620,6 @@ export function ShoppingList() {
     </div>
   );
 
-  <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-4336614010144487"
-    crossorigin="anonymous"></script>
-
-
   return (
     <div className="app-container">
       <nav className="app-navbar" style={{ backgroundColor: "rgba(255, 255, 255, 0.9)" }}>
@@ -846,9 +632,6 @@ export function ShoppingList() {
             style={{ objectFit: 'contain' }}
           />
           <span className="app-name" style={{ color: "black" }}>BuyNote</span>
-          {userPremium && (
-            <span className="premium-badge">PREMIUM</span>
-          )}
         </div>
 
         <div className="navbar-actions">
@@ -865,8 +648,6 @@ export function ShoppingList() {
           </button>
         </div>
       </nav>
-
-      {renderAds()}
 
       <div className="main-content">
         <div className="content-card" style={{ backgroundColor: "rgba(255, 255, 255, 0.9)" }}>
@@ -916,7 +697,7 @@ export function ShoppingList() {
                   {sharedLists.length > 0 && (
                     <optgroup label="Listas compartidas conmigo" style={{ color: "black" }}>
                       {sharedLists.map((list, index) => (
-                        <option key={`shared-${list.id || index}`} value={list.id} style={{ color: "black" }}>
+                        <option key={`shared-${list.id || index}`} value={list.id} style={{ color: "blue" }}>
                           {list.name}
                         </option>
                       ))}
@@ -926,26 +707,61 @@ export function ShoppingList() {
                 <div className="list-actions">
                   <button
                     onClick={openShareDialog}
-                    disabled={!currentList || loading || sharedLists.some(list => list.id === currentList)}
+                    disabled={!currentList || loading || isCurrentListShared()} // ← Cambio importante aquí
                     className="action-btn share-btn"
-                    title="Compartir lista"
+                    title={isCurrentListShared() ? "No puedes compartir una lista compartida" : "Compartir lista"}
                   >
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                      <path d="M18 8C19.6569 8 21 6.65685 21 5C21 3.34315 19.6569 2 18 2C16.3431 2 15 3.34315 15 5C15 5.12548 15.0077 5.24919 15.0227 5.37061L8.0826 9.84066C7.54305 9.32015 6.80879 9 6 9C4.34315 9 3 10.3431 3 12C3 13.6569 4.34315 15 6 15C6.80879 15 7.54305 14.6798 8.0826 14.1593L15.0227 18.6294C15.0077 18.7508 15 18.8745 15 19C15 20.6569 16.3431 22 18 22C19.6569 22 21 20.6569 21 19C21 17.3431 19.6569 16 18 16C17.1912 16 16.4569 16.3202 15.9174 16.8407L8.97727 12.3706C8.99229 12.2492 9 12.1255 9 12C9 11.8745 8.99229 11.7508 8.97727 11.6294L15.9174 7.15934C16.4569 7.67985 17.1912 8 18 8Z" fill="#1e88e5" />
+                      <path
+                        d="M18 8C19.6569 8 21 6.65685 21 5C21 3.34315 19.6569 2 18 2C16.3431 2 15 3.34315 15 5C15 5.12548 15.0077 5.24919 15.0227 5.37061L8.0826 9.84066C7.54305 9.32015 6.80879 9 6 9C4.34315 9 3 10.3431 3 12C3 13.6569 4.34315 15 6 15C6.80879 15 7.54305 14.6798 8.0826 14.1593L15.0227 18.6294C15.0077 18.7508 15 18.8745 15 19C15 20.6569 16.3431 22 18 22C19.6569 22 21 20.6569 21 19C21 17.3431 19.6569 16 18 16C17.1912 16 16.4569 16.3202 15.9174 16.8407L8.97727 12.3706C8.99229 12.2492 9 12.1255 9 12C9 11.8745 8.99229 11.7508 8.97727 11.6294L15.9174 7.15934C16.4569 7.67985 17.1912 8 18 8Z"
+                        fill={isCurrentListShared() ? "#9e9e9e" : "#1e88e5"} // ← Color cambiado según el estado
+                      />
                     </svg>
                   </button>
                   <button
                     onClick={() => currentList && setConfirmListDelete(allLists.find(l => l.id === currentList))}
-                    disabled={!currentList || loading || sharedLists.some(list => list.id === currentList)}
+                    disabled={!currentList || loading || isCurrentListShared()} // ← También deshabilitar eliminar
                     className="action-btn delete-btn"
-                    title="Eliminar lista"
+                    title={isCurrentListShared() ? "No puedes eliminar una lista compartida" : "Eliminar lista"}
                   >
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                      <path d="M19 7L18.1327 19.1425C18.0579 20.1891 17.187 21 16.1378 21H7.86224C6.81296 21 5.94208 20.1891 5.86732 19.1425L5 7M10 11V17M14 11V17M15 7V4C15 3.44772 14.5523 3 14 3H10C9.44772 3 9 3.44772 9 4V7M4 7H20" stroke="#c62828" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                      <path
+                        d="M19 7L18.1327 19.1425C18.0579 20.1891 17.187 21 16.1378 21H7.86224C6.81296 21 5.94208 20.1891 5.86732 19.1425L5 7M10 11V17M14 11V17M15 7V4C15 3.44772 14.5523 3 14 3H10C9.44772 3 9 3.44772 9 4V7M4 7H20"
+                        stroke={isCurrentListShared() ? "#9e9e9e" : "#c62828"} // ← Color cambiado según el estado
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
                     </svg>
                   </button>
                 </div>
               </div>
+
+              {/* Mostrar el nombre de la lista actual con estilo diferente si es compartida */}
+              {currentList && (
+                <div className="current-list-title">
+                  <h3
+                    style={{
+                      color: isCurrentListShared() ? "#1e88e5" : "black",
+                      fontStyle: isCurrentListShared() ? "italic" : "normal"
+                    }}
+                  >
+                    {getCurrentListName()}
+                    {isCurrentListShared() && (
+                      <span
+                        style={{
+                          fontSize: "0.8em",
+                          marginLeft: "10px",
+                          color: "#666",
+                          fontStyle: "normal"
+                        }}
+                      >
+                        (Compartida)
+                      </span>
+                    )}
+                  </h3>
+                </div>
+              )}
             </div>
           ) : (
             <p className="no-lists-message" style={{ color: "black" }}>No tienes listas creadas</p>
@@ -955,27 +771,66 @@ export function ShoppingList() {
             <div className="modal-overlay">
               <div className="share-modal" style={{ backgroundColor: "white" }}>
                 <h3 style={{ color: "black" }}>Compartir lista</h3>
+
+                {/* Mensaje de validación */}
+                {emailValidation.message && (
+                  <div
+                    className={`validation-message ${emailValidation.valid ? 'success' : 'error'}`}
+                    style={{
+                      padding: "10px",
+                      borderRadius: "6px",
+                      marginBottom: "15px",
+                      backgroundColor: emailValidation.valid ? "#e8f5e8" : "#ffebee",
+                      color: emailValidation.valid ? "#2e7d32" : "#c62828",
+                      border: `1px solid ${emailValidation.valid ? "#c8e6c9" : "#ffcdd2"}`
+                    }}
+                  >
+                    {emailValidation.message}
+                  </div>
+                )}
+
                 <div className="share-input">
                   <input
                     type="email"
                     value={emailToShare}
-                    onChange={(e) => setEmailToShare(e.target.value)}
-                    placeholder="Introduce el email"
+                    onChange={(e) => {
+                      setEmailToShare(e.target.value);
+                      // Limpiar mensajes de error cuando el usuario empiece a escribir
+                      if (!emailValidation.valid) {
+                        setEmailValidation({ valid: true, message: "" });
+                      }
+                    }}
+                    placeholder="Introduce el email del usuario"
                     className="elegant-input"
-                    style={{ color: "black", placeholder: "darkgray" }}
+                    style={{
+                      color: "black",
+                      borderColor: emailValidation.valid ? "#e2e8f0" : "#c62828",
+                      placeholder: "darkgray"
+                    }}
+                    disabled={loading}
                   />
                   <button
                     onClick={shareList}
                     disabled={loading || !emailToShare.trim()}
                     className="blue-button"
-                    style={{ backgroundColor: "green" }}
+                    style={{
+                      backgroundColor: "#1e88e5",
+                      opacity: loading ? 0.6 : 1
+                    }}
                   >
-                    Compartir
+                    {loading ? "Comprobando..." : "Compartir"}
                   </button>
                 </div>
+
+                {/* Información adicional */}
+                <div className="share-info" style={{ marginTop: "15px", fontSize: "0.9rem", color: "#666" }}>
+                  <p>• El usuario debe tener una cuenta en BuyNote</p>
+                  <p>• Podrá ver y modificar los productos de la lista</p>
+                </div>
+
                 {sharedUsers.length > 0 && (
                   <div className="shared-users">
-                    <h4 style={{ color: "black" }}>Compartido con:</h4>
+                    <h4 style={{ color: "black", marginTop: "20px" }}>Compartido con:</h4>
                     <ul>
                       {sharedUsers.map((email, index) => (
                         <li key={`shared-${email || index}`} style={{ color: "black" }}>
@@ -987,6 +842,7 @@ export function ShoppingList() {
                               setShareDialogOpen(false);
                             }}
                             className="unshare-btn"
+                            disabled={loading}
                           >
                             Eliminar
                           </button>
@@ -996,9 +852,14 @@ export function ShoppingList() {
                   </div>
                 )}
                 <button
-                  onClick={() => setShareDialogOpen(false)}
+                  onClick={() => {
+                    setShareDialogOpen(false);
+                    setEmailValidation({ valid: true, message: "" });
+                    setEmailToShare("");
+                  }}
                   className="cancel-btn"
-                  style={{ color: "black" }}
+                  style={{ color: "black", marginTop: "15px" }}
+                  disabled={loading}
                 >
                   Cerrar
                 </button>
@@ -1037,7 +898,14 @@ export function ShoppingList() {
           {currentList && (
             <div className="items-section">
               <div className="items-header">
-                <h3 style={{ color: "black" }}>Productos</h3>
+                <h3
+                  style={{
+                    color: isCurrentListShared() ? "#1e88e5" : "black",
+                    fontStyle: isCurrentListShared() ? "italic" : "normal"
+                  }}
+                >
+                  Productos {isCurrentListShared() && "(Lista compartida)"}
+                </h3>
               </div>
 
               <div className="item-input-container">
@@ -1167,8 +1035,6 @@ export function ShoppingList() {
         </div>
       </div>
 
-      {renderPremiumModal()}
-
       {confirmDelete && (
         <div className="modal-overlay">
           <div className="confirmation-modal" style={{ backgroundColor: "white" }}>
@@ -1219,6 +1085,8 @@ export function ShoppingList() {
           </div>
         </div>
       )}
+
+
 
       <style jsx>{`
         :root {
@@ -1929,144 +1797,145 @@ export function ShoppingList() {
 
 
         .modal-overlay {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background-color: rgba(0, 0, 0, 0.5);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 1000;
-  padding: 20px;
-  backdrop-filter: blur(5px);
-}
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: rgba(0, 0, 0, 0.5);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+            padding: 20px;
+            backdrop-filter: blur(5px);
+          }
 
-.floating-modal {
-  background-color: white;
-  border-radius: 12px;
-  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
-  width: 100%;
-  max-width: 500px;
-  overflow: hidden;
-  animation: modalFadeIn 0.3s ease-out;
-  margin: 20px; /* Márgenes en todos los lados */
-  max-height: 90vh; /* Altura máxima */
-  overflow-y: auto; /* Scroll si el contenido es muy largo */
-  position: relative; /* Para posicionar elementos internos */
-}
+          .floating-modal {
+            background-color: white;
+            border-radius: 12px;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
+            width: 100%;
+            max-width: 500px;
+            overflow: hidden;
+            animation: modalFadeIn 0.3s ease-out;
+            margin: 20px; /* Márgenes en todos los lados */
+            max-height: 90vh; /* Altura máxima */
+            overflow-y: auto; /* Scroll si el contenido es muy largo */
+            position: relative; /* Para posicionar elementos internos */
+          }
 
-@keyframes modalFadeIn {
-  from {
-    opacity: 0;
-    transform: translateY(20px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
+          @keyframes modalFadeIn {
+            from {
+              opacity: 0;
+              transform: translateY(20px);
+            }
+            to {
+              opacity: 1;
+              transform: translateY(0);
+            }
+          }
 
-.modal-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 20px;
-  background-color: #f8f9fa;
-  border-bottom: 1px solid #e9ecef;
-  position: sticky;
-  top: 0;
-  z-index: 1;
-}
+          .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 20px;
+            background-color: #f8f9fa;
+            border-bottom: 1px solid #e9ecef;
+            position: sticky;
+            top: 0;
+            z-index: 1;
+          }
 
-.modal-header h3 {
-  margin: 0;
-  color: #212529;
-  font-size: 1.5rem;
-}
+          .modal-header h3 {
+            margin: 0;
+            color: #212529;
+            font-size: 1.5rem;
+          }
 
-.close-modal-btn {
-  background: none;
-  border: none;
-  font-size: 1.5rem;
-  cursor: pointer;
-  color: #6c757d;
-  padding: 0 10px;
-  transition: color 0.2s;
-}
+          .close-modal-btn {
+            background: none;
+            border: none;
+            font-size: 1.5rem;
+            cursor: pointer;
+            color: #6c757d;
+            padding: 0 10px;
+            transition: color 0.2s;
+          }
 
-.close-modal-btn:hover {
-  color: #495057;
-}
+          .close-modal-btn:hover {
+            color: #495057;
+          }
 
-.modal-content {
-  padding: 20px;
-}
+          .modal-content {
+            padding: 20px;
+          }
 
-.premium-features {
-  margin-bottom: 20px;
-}
+          .premium-features {
+            margin-bottom: 20px;
+          }
 
-.feature {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-bottom: 12px;
-  color: #212529;
-}
+          .feature {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 12px;
+            color: #212529;
+          }
 
-.pricing {
-  text-align: center;
-  margin: 20px 0;
-}
+          .pricing {
+            text-align: center;
+            margin: 20px 0;
+          }
 
-.pricing h4 {
-  font-size: 1.3rem;
-  color: #28a745;
-  margin-bottom: 5px;
-}
+          .pricing h4 {
+            font-size: 1.3rem;
+            color: #28a745;
+            margin-bottom: 5px;
+          }
 
-.pricing p {
-  color: #6c757d;
-  font-size: 0.9rem;
-}
+          .pricing p {
+            color: #6c757d;
+            font-size: 0.9rem;
+          }
 
-.paypal-container {
-  margin: 20px 0;
-  min-height: 45px;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-}
+          .paypal-container {
+            margin: 20px 0;
+            min-height: 45px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+          }
 
-.secure-payment {
-  text-align: center;
-  color: #6c757d;
-  font-size: 0.8rem;
-  margin-top: 10px;
-}
+          .secure-payment {
+            text-align: center;
+            color: #6c757d;
+            font-size: 0.8rem;
+            margin-top: 10px;
+          }
 
-@media (max-width: 576px) {
-  .floating-modal {
-    margin: 10px;
-    max-width: calc(100% - 20px); /* Asegura que no toque los bordes */
-  }
-  
-  .modal-header {
-    padding: 15px;
-  }
-  
-  .modal-header h3 {
-    font-size: 1.3rem;
-  }
-  
-  .modal-content {
-    padding: 15px;
-  }
-}
-}
+          @media (max-width: 576px) {
+            .floating-modal {
+              margin: 10px;
+              max-width: calc(100% - 20px); /* Asegura que no toque los bordes */
+            }
+            
+            .modal-header {
+              padding: 15px;
+            }
+            
+            .modal-header h3 {
+              font-size: 1.3rem;
+            }
+            
+            .modal-content {
+              padding: 15px;
+            }
+          }
+        }
       `}</style>
+
     </div>
   );
 }
