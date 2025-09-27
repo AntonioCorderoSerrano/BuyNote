@@ -1086,8 +1086,6 @@ export function ShoppingList() {
         </div>
       )}
 
-
-
       <style jsx>{`
         :root {
           --primary-blue: #1e88e5;
