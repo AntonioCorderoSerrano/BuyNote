@@ -199,7 +199,12 @@ export function ShoppingList() {
     );
 
     const unsubscribe = onSnapshot(sharedListsQuery, (snapshot) => {
-      const sharedListsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      const sharedListsData = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data(),
+        // Asegurar que ownerEmail esté presente
+        ownerEmail: doc.data().ownerEmail || ""
+      }));
 
       // Actualizar cache primero
       listsCache.current.sharedLists = sharedListsData;
@@ -257,9 +262,10 @@ export function ShoppingList() {
         id: tempId,
         name: newListName,
         userId: auth.currentUser.uid,
+        ownerEmail: auth.currentUser.email, // ← Añadir email del propietario
         sharedWith: [],
         createdAt: new Date(),
-        isOptimistic: true // Marcar como temporal
+        isOptimistic: true
       };
 
       // Actualizar estado inmediatamente (Optimistic UI)
@@ -271,6 +277,7 @@ export function ShoppingList() {
       const docRef = await addDoc(collection(db, "lists"), {
         name: newListName,
         userId: auth.currentUser.uid,
+        ownerEmail: auth.currentUser.email, // ← Añadir email del propietario aquí también
         sharedWith: [],
         createdAt: new Date()
       });
