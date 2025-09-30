@@ -2020,7 +2020,7 @@ export function ShoppingList() {
         }}
       />
 
-      <nav  style={{
+      <nav style={{
         backgroundColor: 'white',
         boxShadow: '0 2px 10px rgba(0,0,0,0.1)',
         padding: '16px 0',
@@ -2115,26 +2115,32 @@ export function ShoppingList() {
           borderRadius: '0',
           boxShadow: 'none',
           padding: '24px',
-          marginBottom: '0',
+          margin: '0',
           flex: 1,
           display: 'flex',
           flexDirection: 'column',
           minHeight: 'calc(100vh - 80px)',
-          width: '100%'
+          width: '100%',
+          maxWidth: '100%',
+          boxSizing: 'border-box'
         }}>
           {/* Creador elegante de listas */}
           <ElegantListCreator />
 
           {/* Selector de lista elegante */}
           {allLists.length > 0 && (
-            <div className="elegant-list-selector" style={{ marginBottom: '24px' }}>
+            <div className="elegant-list-selector" style={{
+              marginBottom: '24px',
+              width: '100%'
+            }}>
               <div className="selector-header" style={{
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'space-between',
                 marginBottom: '16px',
                 flexWrap: 'wrap',
-                gap: '12px'
+                gap: '12px',
+                width: '100%'
               }}>
                 <h3 style={{
                   fontSize: '20px',
@@ -2145,7 +2151,11 @@ export function ShoppingList() {
                   Seleccionar Lista
                 </h3>
 
-                <div className="list-actions" style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                <div className="list-actions" style={{
+                  display: 'flex',
+                  gap: '8px',
+                  flexWrap: 'wrap'
+                }}>
                   <button
                     onClick={openShareDialog}
                     disabled={!currentList || loading || isCurrentListShared()}
@@ -2163,7 +2173,8 @@ export function ShoppingList() {
                       gap: '6px',
                       fontSize: '14px',
                       fontWeight: '500',
-                      transition: 'all 0.2s'
+                      transition: 'all 0.2s',
+                      minWidth: 'fit-content'
                     }}
                     onMouseEnter={(e) => {
                       if (!isCurrentListShared()) {
@@ -2209,7 +2220,8 @@ export function ShoppingList() {
                       fontWeight: '500',
                       transition: 'all 0.2s',
                       color: !isCurrentListOwned() ? '#9CA3AF' : '#EF4444',
-                      borderColor: !isCurrentListOwned() ? '#E5E7EB' : '#FECACA'
+                      borderColor: !isCurrentListOwned() ? '#E5E7EB' : '#FECACA',
+                      minWidth: 'fit-content'
                     }}
                     onMouseEnter={(e) => {
                       if (isCurrentListOwned()) {
@@ -2252,7 +2264,8 @@ export function ShoppingList() {
                   color: '#1F2937',
                   backgroundColor: 'white',
                   outline: 'none',
-                  cursor: 'pointer'
+                  cursor: 'pointer',
+                  boxSizing: 'border-box'
                 }}
               >
                 <option value="" disabled hidden>
@@ -2300,7 +2313,9 @@ export function ShoppingList() {
                   padding: '16px',
                   backgroundColor: '#F8FAFC',
                   borderRadius: '8px',
-                  border: '1px solid #E2E8F0'
+                  border: '1px solid #E2E8F0',
+                  width: '100%',
+                  boxSizing: 'border-box'
                 }}>
                   <h4 style={{
                     fontSize: '18px',
@@ -2348,7 +2363,8 @@ export function ShoppingList() {
               display: 'flex',
               flexDirection: 'column',
               justifyContent: 'center',
-              alignItems: 'center'
+              alignItems: 'center',
+              width: '100%'
             }}>
               <svg width="64" height="64" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ marginBottom: '16px', opacity: 0.5 }}>
                 <path d="M9 5H7C5.89543 5 5 5.89543 5 7V19C5 20.1046 5.89543 21 7 21H17C18.1046 21 19 20.1046 19 19V7C19 5.89543 18.1046 5 17 5H15M9 5C9 6.10457 9.89543 7 11 7H13C14.1046 7 15 6.10457 15 5M9 5C9 3.89543 9.89543 3 11 3H13C14.1046 3 15 3.89543 15 5M12 12H15M12 16H15M9 12H9.01M9 16H9.01" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
@@ -2360,14 +2376,21 @@ export function ShoppingList() {
 
           {/* Sección de items - SOLO se muestra si hay una lista seleccionada */}
           {currentList && (
-            <div className="elegant-items-section" style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+            <div className="elegant-items-section" style={{
+              flex: 1,
+              display: 'flex',
+              flexDirection: 'column',
+              width: '100%'
+            }}>
               <div className="section-header" style={{
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'space-between',
                 marginBottom: '20px',
                 flexWrap: 'wrap',
-                gap: '12px'
+                gap: '12px',
+                width: '100%',
+                padding: '0 8px' // Espacio lateral en el header
               }}>
                 <h3 style={{
                   fontSize: '20px',
@@ -2384,7 +2407,8 @@ export function ShoppingList() {
                     color: '#6B7280',
                     backgroundColor: '#F3F4F6',
                     padding: '4px 12px',
-                    borderRadius: '20px'
+                    borderRadius: '20px',
+                    flexShrink: 0
                   }}>
                     {pendingItems.length} pendientes • {completedItems.length} comprados
                   </div>
@@ -2392,16 +2416,24 @@ export function ShoppingList() {
               </div>
 
               {/* Añadir items elegante */}
-              <ElegantItemAdder />
+              <div style={{ padding: '0 8px' }}> {/* Espacio lateral para el adder */}
+                <ElegantItemAdder />
+              </div>
 
               {/* Lista de items */}
               {items.length > 0 ? (
-                <div className="elegant-items-container" style={{ flex: 1, overflow: 'auto' }}>
+                <div className="elegant-items-container" style={{
+                  flex: 1,
+                  overflow: 'auto',
+                  width: '100%',
+                  padding: '0 8px', // Espacio lateral en el contenedor
+                  boxSizing: 'border-box'
+                }}>
                   {/* Items pendientes agrupados por categoría */}
                   {Object.keys(groupedPendingItems).map(category => {
                     const categoryInfo = getCategoryInfo(category);
                     return (
-                      <div key={`category-${category}`} className="category-section">
+                      <div key={`category-${category}`} className="category-section" style={{ width: '100%' }}>
                         <div className="category-header" style={{
                           display: 'flex',
                           alignItems: 'center',
@@ -2411,7 +2443,9 @@ export function ShoppingList() {
                           borderLeft: `4px solid ${categoryInfo.color}`,
                           borderRadius: '8px',
                           margin: '16px 0 8px 0',
-                          flexWrap: 'wrap'
+                          flexWrap: 'wrap',
+                          width: '100%',
+                          boxSizing: 'border-box'
                         }}>
                           <span style={{
                             fontSize: '18px',
@@ -2447,7 +2481,8 @@ export function ShoppingList() {
                           margin: 0,
                           display: 'flex',
                           flexDirection: 'column',
-                          gap: '8px'
+                          gap: '12px',
+                          width: '100%'
                         }}>
                           {groupedPendingItems[category].map(item => (
                             <ElegantItem key={item.id} item={item} />
@@ -2459,7 +2494,7 @@ export function ShoppingList() {
 
                   {/* Sección de COMPRADO */}
                   {completedItems.length > 0 && (
-                    <div className="completed-section">
+                    <div className="completed-section" style={{ width: '100%' }}>
                       <div className="category-header" style={{
                         display: 'flex',
                         alignItems: 'center',
@@ -2469,7 +2504,9 @@ export function ShoppingList() {
                         borderLeft: '4px solid #10B981',
                         borderRadius: '8px',
                         margin: '24px 0 8px 0',
-                        flexWrap: 'wrap'
+                        flexWrap: 'wrap',
+                        width: '100%',
+                        boxSizing: 'border-box'
                       }}>
                         <span style={{
                           fontSize: '18px',
@@ -2505,7 +2542,8 @@ export function ShoppingList() {
                         margin: 0,
                         display: 'flex',
                         flexDirection: 'column',
-                        gap: '8px'
+                        gap: '12px',
+                        width: '100%'
                       }}>
                         {completedItems.map(item => (
                           <ElegantItem key={item.id} item={item} />
@@ -2524,7 +2562,10 @@ export function ShoppingList() {
                   alignItems: 'center',
                   justifyContent: 'center',
                   minHeight: '200px',
-                  flex: 1
+                  flex: 1,
+                  width: '100%',
+                  padding: '0 8px', // Espacio lateral también en estado vacío
+                  boxSizing: 'border-box'
                 }}>
                   <svg
                     width="64"
@@ -2724,9 +2765,9 @@ export function ShoppingList() {
               </div>
 
               {/* Información adicional */}
-              <div className="share-info" style={{ 
-                marginTop: "20px", 
-                fontSize: "0.9rem", 
+              <div className="share-info" style={{
+                marginTop: "20px",
+                fontSize: "0.9rem",
                 color: "#6b7280",
                 backgroundColor: '#f8fafc',
                 padding: '16px',
@@ -2739,8 +2780,8 @@ export function ShoppingList() {
 
               {sharedUsers.length > 0 && (
                 <div className="shared-users" style={{ marginTop: '20px' }}>
-                  <h4 style={{ 
-                    color: "#1f2937", 
+                  <h4 style={{
+                    color: "#1f2937",
                     marginBottom: '12px',
                     fontSize: '1rem',
                     fontWeight: '600'
@@ -2749,8 +2790,8 @@ export function ShoppingList() {
                   </h4>
                   <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
                     {sharedUsers.map((email, index) => (
-                      <li key={`shared-${email || index}`} style={{ 
-                        color: "#1f2937", 
+                      <li key={`shared-${email || index}`} style={{
+                        color: "#1f2937",
                         display: 'flex',
                         justifyContent: 'space-between',
                         alignItems: 'center',
@@ -2911,8 +2952,8 @@ export function ShoppingList() {
               overflowY: 'auto',
               background: 'white'
             }}>
-              <p style={{ 
-                color: "#1f2937", 
+              <p style={{
+                color: "#1f2937",
                 margin: 0,
                 fontSize: '16px',
                 lineHeight: '1.5'
@@ -3070,8 +3111,8 @@ export function ShoppingList() {
               overflowY: 'auto',
               background: 'white'
             }}>
-              <p style={{ 
-                color: "#1f2937", 
+              <p style={{
+                color: "#1f2937",
                 margin: 0,
                 fontSize: '16px',
                 lineHeight: '1.5'
@@ -3221,8 +3262,8 @@ export function ShoppingList() {
               overflowY: 'auto',
               background: 'white'
             }}>
-              <p style={{ 
-                color: "#1f2937", 
+              <p style={{
+                color: "#1f2937",
                 margin: 0,
                 fontSize: '16px',
                 lineHeight: '1.5'
