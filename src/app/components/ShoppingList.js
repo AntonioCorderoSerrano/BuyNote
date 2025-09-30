@@ -54,7 +54,7 @@ export function ShoppingList() {
       name: "Lácteos",
       icon: "🥛",
       color: "#FFEB3B",
-      keywords: ["leche", "queso", "yogur", "mantequilla", "nata", "crema", "queso crema", "leche condensada", "leche evaporada", "requesón", "kefir", "batido de leche"]
+      keywords: ["leche", "queso", "yogur", "mantequilla", "margarina", "nata", "crema", "queso crema", "leche condensada", "leche evaporada", "requesón", "kefir", "batido de leche"]
     },
     "BAKERY": {
       name: "Panadería",
@@ -72,7 +72,7 @@ export function ShoppingList() {
       name: "Bebidas",
       icon: "🥤",
       color: "#03A9F4",
-      keywords: ["agua", "refresco", "zumo", "jugo", "cerveza", "vino", "café", "té", "bebida energética", "batido", "licor", "kombucha", "agua con gas", "horchata", "infusión"]
+      keywords: ["agua", "refresco", "zumo", "jugo", "cerveza", "vino", "café", "té", "bebida energética", "batido", "licor", "kombucha", "agua con gas", "horchata", "infusión", "cola cao"]
     },
     "FROZEN": {
       name: "Congelados",
@@ -365,9 +365,6 @@ export function ShoppingList() {
 
       await updateDoc(itemRef, updates);
 
-      const action = newCompletedStatus ? 'marcado como comprado' : 'desmarcado';
-      showToast(`Producto ${action}`, 'success');
-
     } catch (err) {
       console.error("Error actualizando item:", err);
 
@@ -486,13 +483,396 @@ export function ShoppingList() {
     const sharePerPerson = totalAmount / participants.length;
 
     const result = `Resumen de Gastos\n\n
-Total gastado: ${totalAmount.toFixed(2)} €\n
-Número de personas: ${participants.length}\n
-Precio por persona: ${sharePerPerson.toFixed(2)} €\n\n
-${participants.map((p, i) => `${i + 1}. ${p}: ${sharePerPerson.toFixed(2)} €`).join('\n')}`;
+    Total gastado: ${totalAmount.toFixed(2)} €\n
+    Número de personas: ${participants.length}\n
+    Precio por persona: ${sharePerPerson.toFixed(2)} €\n\n
+    ${participants.map((p, i) => `${i + 1}. ${p}: ${sharePerPerson.toFixed(2)} €`).join('\n')}`;
 
     navigator.clipboard.writeText(result);
     showToast("Resumen copiado al portapapeles", 'success');
+  };
+
+  // Componente separado para el contenido del modal de división de gastos
+  const SplitDialogContent = () => {
+    const [hasCalculated, setHasCalculated] = useState(false);
+
+    const totalPrice = purchaseInfo[currentList]?.totalPrice ||
+      Object.values(itemPrices[currentList] || {}).reduce((sum, price) => sum + price.amount, 0);
+    const participants = [auth.currentUser?.email || "Tú", ...(allLists.find(list => list.id === currentList)?.sharedWith || [])];
+
+    if (!totalPrice || totalPrice === 0) {
+      return (
+        <div className="dialog-content" style={{
+          padding: '24px',
+          flex: 1,
+          overflowY: 'auto',
+          background: 'white'
+        }}>
+          <div style={{ textAlign: 'center', padding: '20px' }}>
+            <div style={{
+              width: '64px',
+              height: '64px',
+              margin: '0 auto 16px',
+              backgroundColor: '#f3f4f6',
+              borderRadius: '50%',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontSize: '24px',
+              color: '#6b7280'
+            }}>
+              💰
+            </div>
+            <p style={{
+              color: '#374151',
+              marginBottom: '8px',
+              fontSize: '16px',
+              fontWeight: '500'
+            }}>
+              Precio total no establecido
+            </p>
+            <p style={{
+              color: '#6b7280',
+              fontSize: '14px',
+              lineHeight: '1.5'
+            }}>
+              Primero establece el precio total de la compra usando 'Finalizar Compra'
+            </p>
+          </div>
+        </div>
+      );
+    }
+
+    const sharePerPerson = totalPrice / participants.length;
+
+    // Mostrar resultados solo si se ha hecho clic en Calcular
+    if (hasCalculated) {
+      return (
+        <>
+          <div className="dialog-content" style={{
+            padding: '24px',
+            flex: 1,
+            overflowY: 'auto',
+            background: 'white'
+          }}>
+            <div className="split-result" style={{
+              backgroundColor: '#f8fafc',
+              padding: '20px',
+              borderRadius: '8px',
+              margin: '16px 0',
+              border: '1px solid #e5e7eb'
+            }}>
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                marginBottom: '16px',
+                paddingBottom: '12px',
+                borderBottom: '1px solid #e5e7eb'
+              }}>
+                <div style={{
+                  width: '32px',
+                  height: '32px',
+                  backgroundColor: '#10b981',
+                  borderRadius: '6px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: '16px',
+                  color: 'white'
+                }}>
+                  ✓
+                </div>
+                <h4 style={{
+                  margin: 0,
+                  fontSize: '18px',
+                  fontWeight: '600',
+                  color: '#065f46'
+                }}>
+                  Cálculo Completado
+                </h4>
+              </div>
+
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+                gap: '16px',
+                marginBottom: '20px'
+              }}>
+                <div style={{
+                  backgroundColor: 'white',
+                  padding: '12px',
+                  borderRadius: '6px',
+                  border: '1px solid #d1d5db'
+                }}>
+                  <div style={{
+                    fontSize: '12px',
+                    color: '#6b7280',
+                    marginBottom: '4px',
+                    fontWeight: '500'
+                  }}>
+                    TOTAL GASTADO
+                  </div>
+                  <div style={{
+                    fontSize: '20px',
+                    fontWeight: '700',
+                    color: '#1f2937'
+                  }}>
+                    {totalPrice.toFixed(2)} €
+                  </div>
+                </div>
+
+                <div style={{
+                  backgroundColor: 'white',
+                  padding: '12px',
+                  borderRadius: '6px',
+                  border: '1px solid #d1d5db'
+                }}>
+                  <div style={{
+                    fontSize: '12px',
+                    color: '#6b7280',
+                    marginBottom: '4px',
+                    fontWeight: '500'
+                  }}>
+                    PERSONAS
+                  </div>
+                  <div style={{
+                    fontSize: '20px',
+                    fontWeight: '700',
+                    color: '#1f2937'
+                  }}>
+                    {participants.length}
+                  </div>
+                </div>
+
+                <div style={{
+                  backgroundColor: '#10b981',
+                  padding: '12px',
+                  borderRadius: '6px',
+                  border: '1px solid #059669'
+                }}>
+                  <div style={{
+                    fontSize: '12px',
+                    color: 'white',
+                    marginBottom: '4px',
+                    fontWeight: '500',
+                    opacity: 0.9
+                  }}>
+                    POR PERSONA
+                  </div>
+                  <div style={{
+                    fontSize: '20px',
+                    fontWeight: '700',
+                    color: 'white'
+                  }}>
+                    {sharePerPerson.toFixed(2)} €
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="dialog-buttons" style={{
+            display: 'flex',
+            gap: '12px',
+            justifyContent: 'flex-end',
+            padding: '0 24px 24px',
+            flexWrap: 'wrap',
+            background: 'white'
+          }}>
+            <button
+              onClick={() => setSplitDialogOpen(false)}
+              className="cancel-btn"
+              style={{
+                backgroundColor: '#f3f4f6',
+                color: '#374151',
+                border: '1px solid #d1d5db',
+                padding: '10px 20px',
+                borderRadius: '8px',
+                cursor: 'pointer',
+                fontWeight: '500',
+                transition: 'all 0.2s',
+                minWidth: '80px'
+              }}
+              onMouseEnter={(e) => {
+                e.target.style.backgroundColor = '#e5e7eb';
+                e.target.style.borderColor = '#9ca3af';
+              }}
+              onMouseLeave={(e) => {
+                e.target.style.backgroundColor = '#f3f4f6';
+                e.target.style.borderColor = '#d1d5db';
+              }}
+            >
+              Cerrar
+            </button>
+            <button
+              onClick={() => {
+                const result = `Resumen de Gastos\n\nTotal gastado: ${totalPrice.toFixed(2)} €\nNúmero de personas: ${participants.length}\nPrecio por persona: ${sharePerPerson.toFixed(2)} €\n\n${participants.map((p, i) => `${i + 1}. ${p}: ${sharePerPerson.toFixed(2)} €`).join('\n')}`;
+                navigator.clipboard.writeText(result);
+                showToast("Resumen copiado al portapapeles", 'success');
+              }}
+              className="blue-button"
+              style={{
+                backgroundColor: '#10b981',
+                color: 'white',
+                border: 'none',
+                padding: '10px 20px',
+                borderRadius: '8px',
+                cursor: 'pointer',
+                fontWeight: '500',
+                transition: 'all 0.2s',
+                minWidth: '100px'
+              }}
+              onMouseEnter={(e) => {
+                e.target.style.backgroundColor = '#059669';
+              }}
+              onMouseLeave={(e) => {
+                e.target.style.backgroundColor = '#10b981';
+              }}
+            >
+              <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M8 16H6C4.89543 16 4 15.1046 4 14V6C4 4.89543 4.89543 4 6 4H14C15.1046 4 16 4.89543 16 6V8M10 20H18C19.1046 20 20 19.1046 20 18V10C20 8.89543 19.1046 8 18 8H10C8.89543 8 8 8.89543 8 10V18C8 19.1046 8.89543 20 10 20Z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+                Copiar
+              </span>
+            </button>
+          </div>
+        </>
+      );
+    }
+
+    // Estado inicial - mostrar información básica
+    return (
+      <>
+        <div className="dialog-content" style={{
+          padding: '24px',
+          flex: 1,
+          overflowY: 'auto',
+          background: 'white'
+        }}>
+          <div style={{ textAlign: 'center', padding: '20px 0' }}>
+            <div style={{
+              width: '80px',
+              height: '80px',
+              margin: '0 auto 20px',
+              backgroundColor: '#f0f9ff',
+              borderRadius: '50%',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontSize: '32px',
+              color: '#3b82f6'
+            }}>
+              👥
+            </div>
+            <h4 style={{
+              margin: '0 0 12px 0',
+              fontSize: '18px',
+              fontWeight: '600',
+              color: '#1f2937'
+            }}>
+              Dividir Gastos
+            </h4>
+            <p style={{
+              color: '#6b7280',
+              fontSize: '14px',
+              lineHeight: '1.5',
+              marginBottom: '24px'
+            }}>
+              Calcula cómo dividir el total de <strong>{totalPrice.toFixed(2)} €</strong> entre <strong>{participants.length}</strong> persona{participants.length !== 1 ? 's' : ''}
+            </p>
+            <div style={{
+              backgroundColor: '#f8fafc',
+              padding: '16px',
+              borderRadius: '8px',
+              border: '1px solid #e5e7eb'
+            }}>
+              <div style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                marginBottom: '8px'
+              }}>
+                <span style={{ color: '#6b7280', fontSize: '14px' }}>Total disponible:</span>
+                <strong style={{ color: '#1f2937' }}>{totalPrice.toFixed(2)} €</strong>
+              </div>
+              <div style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center'
+              }}>
+                <span style={{ color: '#6b7280', fontSize: '14px' }}>Personas participantes:</span>
+                <strong style={{ color: '#1f2937' }}>{participants.length}</strong>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="dialog-buttons" style={{
+          display: 'flex',
+          gap: '12px',
+          justifyContent: 'flex-end',
+          padding: '0 24px 24px',
+          flexWrap: 'wrap',
+          background: 'white'
+        }}>
+          <button
+            onClick={() => setSplitDialogOpen(false)}
+            className="cancel-btn"
+            style={{
+              backgroundColor: '#f3f4f6',
+              color: '#374151',
+              border: '1px solid #d1d5db',
+              padding: '10px 20px',
+              borderRadius: '8px',
+              cursor: 'pointer',
+              fontWeight: '500',
+              transition: 'all 0.2s',
+              minWidth: '80px'
+            }}
+            onMouseEnter={(e) => {
+              e.target.style.backgroundColor = '#e5e7eb';
+              e.target.style.borderColor = '#9ca3af';
+            }}
+            onMouseLeave={(e) => {
+              e.target.style.backgroundColor = '#f3f4f6';
+              e.target.style.borderColor = '#d1d5db';
+            }}
+          >
+            Cerrar
+          </button>
+          <button
+            onClick={() => setHasCalculated(true)}
+            className="blue-button"
+            style={{
+              backgroundColor: '#3b82f6',
+              color: 'white',
+              border: 'none',
+              padding: '10px 20px',
+              borderRadius: '8px',
+              cursor: 'pointer',
+              fontWeight: '500',
+              transition: 'all 0.2s',
+              minWidth: '100px'
+            }}
+            onMouseEnter={(e) => {
+              e.target.style.backgroundColor = '#2563eb';
+            }}
+            onMouseLeave={(e) => {
+              e.target.style.backgroundColor = '#3b82f6';
+            }}
+          >
+            <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M9 7H5C3.89543 7 3 7.89543 3 9V18C3 19.1046 3.89543 20 5 20H13C14.1046 20 15 19.1046 15 18V14M9 7V5C9 3.89543 9.89543 3 11 3H15.5858C15.851 3 16.1054 3.10536 16.2929 3.29289L20.7071 7.70711C20.8946 7.89464 21 8.149 21 8.41421V13C21 14.1046 20.1046 15 19 15H15M9 7H11C12.1046 7 13 7.89543 13 9V14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+              Calcular
+            </span>
+          </button>
+        </div>
+      </>
+    );
   };
 
   // Cargar precios de items
@@ -643,6 +1023,7 @@ ${participants.map((p, i) => `${i + 1}. ${p}: ${sharePerPerson.toFixed(2)} €`)
         ...listsCache.current.sharedLists
       ];
 
+      // Si no hay lista actual pero hay listas disponibles, seleccionar la primera
       if (allLists.length > 0 && !currentList) {
         setCurrentList(allLists[0].id);
       }
@@ -670,6 +1051,15 @@ ${participants.map((p, i) => `${i + 1}. ${p}: ${sharePerPerson.toFixed(2)} €`)
       const userLists = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       listsCache.current.userLists = userLists;
       setLists(userLists);
+
+      // Si la lista actual fue eliminada y hay listas propias, seleccionar la primera
+      if (currentList && !userLists.some(list => list.id === currentList) && userLists.length > 0) {
+        setCurrentList(userLists[0].id);
+      }
+      // Si no hay lista actual pero hay listas propias, seleccionar la primera
+      else if (!currentList && userLists.length > 0) {
+        setCurrentList(userLists[0].id);
+      }
     });
 
     return unsubscribe;
@@ -690,6 +1080,11 @@ ${participants.map((p, i) => `${i + 1}. ${p}: ${sharePerPerson.toFixed(2)} €`)
 
       listsCache.current.sharedLists = sharedListsData;
       setSharedLists(sharedListsData);
+
+      // Si la lista actual fue eliminada y no hay listas propias, limpiar currentList
+      if (currentList && !sharedListsData.some(list => list.id === currentList) && lists.length === 0) {
+        setCurrentList("");
+      }
     });
 
     return unsubscribe;
@@ -1448,100 +1843,6 @@ ${participants.map((p, i) => `${i + 1}. ${p}: ${sharePerPerson.toFixed(2)} €`)
           </svg>
           <span className="button-text">Crear Lista</span>
         </button>
-
-        <style jsx>{`
-        @media (max-width: 640px) {
-          .elegant-list-creator {
-            flex-direction: column;
-            gap: 12px;
-            padding: 12px;
-          }
-          
-          .elegant-input {
-            flex: 1 1 auto;
-            min-width: 100%;
-            font-size: 16px; /* Previene zoom en iOS */
-          }
-          
-          .elegant-create-btn {
-            flex: 0 0 auto;
-            width: 100%;
-            min-width: auto;
-            padding: 14px 16px;
-          }
-          
-          .button-text {
-            display: block;
-          }
-        }
-        
-        @media (max-width: 480px) {
-          .elegant-list-creator {
-            margin-bottom: 16px;
-            padding: 12px;
-          }
-          
-          .elegant-input {
-            padding: 14px 12px;
-            font-size: 16px;
-          }
-          
-          .elegant-create-btn {
-            padding: 14px 12px;
-            font-size: 16px;
-          }
-        }
-        
-        @media (max-width: 380px) {
-          .elegant-list-creator {
-            gap: 10px;
-            padding: 10px;
-          }
-          
-          .elegant-input {
-            padding: 12px;
-            font-size: 16px;
-          }
-          
-          .elegant-create-btn {
-            padding: 12px;
-            font-size: 15px;
-          }
-          
-          .elegant-create-btn svg {
-            width: 18px;
-            height: 18px;
-          }
-        }
-        
-        /* Para tablets en modo vertical */
-        @media (min-width: 641px) and (max-width: 768px) {
-          .elegant-list-creator {
-            gap: 10px;
-          }
-          
-          .elegant-input {
-            flex: 1 1 150px;
-          }
-          
-          .elegant-create-btn {
-            min-width: 130px;
-            padding: 12px 16px;
-          }
-        }
-        
-        /* Mejora la experiencia táctil en dispositivos móviles */
-        @media (hover: none) {
-          .elegant-create-btn:hover {
-            background-color: inherit;
-          }
-          
-          .elegant-create-btn:active {
-            background-color: #2563EB;
-            transform: scale(0.98);
-          }
-        }
-      `}</style>
       </div>
     );
   };
@@ -1637,128 +1938,6 @@ ${participants.map((p, i) => `${i + 1}. ${p}: ${sharePerPerson.toFixed(2)} €`)
           </svg>
           <span className="button-text">Añadir</span>
         </button>
-
-        <style jsx>{`
-        @media (max-width: 640px) {
-          .elegant-item-adder {
-            flex-direction: column;
-            gap: 12px;
-            margin-bottom: 16px;
-          }
-          
-          .elegant-input {
-            flex: 1 1 auto;
-            min-width: 100%;
-            font-size: 16px; /* Previene zoom en iOS */
-            padding: 14px 16px;
-          }
-          
-          .elegant-add-btn {
-            flex: 0 0 auto;
-            width: 100%;
-            min-width: auto;
-            padding: 14px 16px;
-          }
-          
-          .button-text {
-            display: block;
-          }
-        }
-        
-        @media (max-width: 480px) {
-          .elegant-item-adder {
-            margin-bottom: 16px;
-          }
-          
-          .elegant-input {
-            padding: 14px 12px;
-            font-size: 16px;
-          }
-          
-          .elegant-add-btn {
-            padding: 14px 12px;
-            font-size: 16px;
-          }
-        }
-        
-        @media (max-width: 380px) {
-          .elegant-item-adder {
-            gap: 10px;
-          }
-          
-          .elegant-input {
-            padding: 12px;
-            font-size: 16px;
-          }
-          
-          .elegant-add-btn {
-            padding: 12px;
-            font-size: 15px;
-          }
-          
-          .elegant-add-btn svg {
-            width: 18px;
-            height: 18px;
-          }
-        }
-        
-        /* Para tablets en modo vertical */
-        @media (min-width: 641px) and (max-width: 768px) {
-          .elegant-item-adder {
-            gap: 10px;
-          }
-          
-          .elegant-input {
-            flex: 1 1 150px;
-          }
-          
-          .elegant-add-btn {
-            min-width: 110px;
-            padding: 12px 16px;
-          }
-        }
-        
-        /* Para pantallas muy grandes */
-        @media (min-width: 1200px) {
-          .elegant-item-adder {
-            gap: 16px;
-          }
-          
-          .elegant-input {
-            flex: 1 1 300px;
-          }
-        }
-        
-        /* Mejora la experiencia táctil en dispositivos móviles */
-        @media (hover: none) {
-          .elegant-add-btn:hover {
-            background-color: inherit;
-          }
-          
-          .elegant-add-btn:active {
-            background-color: #059669;
-            transform: scale(0.98);
-          }
-        }
-        
-        /* Mejoras de accesibilidad */
-        .elegant-input:focus {
-          border-color: #3B82F6;
-          box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
-        }
-        
-        .elegant-add-btn:focus {
-          outline: 2px solid #3B82F6;
-          outline-offset: 2px;
-        }
-        
-        /* Estados de loading mejorados */
-        .elegant-add-btn:disabled {
-          opacity: 0.6;
-          cursor: not-allowed;
-          transform: none;
-        }
-      `}</style>
       </div>
     );
   };
@@ -1821,31 +2000,37 @@ ${participants.map((p, i) => `${i + 1}. ${p}: ${sharePerPerson.toFixed(2)} €`)
   return (
     <div className="elegant-app-container" style={{
       minHeight: '100vh',
-      backgroundColor: '#F3F4F6'
+      backgroundColor: '#F3F4F6',
+      display: 'flex',
+      flexDirection: 'column'
     }}>
 
       <ToastContainer
+        position="top-center"
+        autoClose={3000}
+        hideProgressBar={false}
+        newestOnTop={false}
+        closeOnClick
+        rtl={false}
+        pauseOnFocusLoss
+        draggable
+        pauseOnHover
         style={{
-          position: 'fixed',
-          top: '20px',
-          left: '50%',
-          transform: 'translateX(-50%)',
-          zIndex: 2000,
-          maxWidth: '90%'
+          fontSize: '14px',
         }}
-        closeButton={false}
-        autoClose={2000}
-        hideProgressBar={true}
       />
 
-      <nav className="elegant-navbar" style={{
+      <nav  style={{
         backgroundColor: 'white',
         boxShadow: '0 2px 10px rgba(0,0,0,0.1)',
         padding: '16px 0',
-        marginBottom: '24px'
+        flexShrink: 0,
+        width: '100%',
+        position: 'relative',
+        zIndex: 100
       }}>
         <div className="navbar-content" style={{
-          maxWidth: '1200px',
+          maxWidth: '100%',
           margin: '0 auto',
           padding: '0 20px',
           display: 'flex',
@@ -1916,17 +2101,26 @@ ${participants.map((p, i) => `${i + 1}. ${p}: ${sharePerPerson.toFixed(2)} €`)
         </div>
       </nav>
 
-      <div className="elegant-main-content" style={{
-        maxWidth: '1200px',
-        margin: '0 auto',
-        padding: '0 20px'
+      <main className="elegant-main-content" style={{
+        flex: 1,
+        display: 'flex',
+        flexDirection: 'column',
+        width: '100%',
+        maxWidth: '100%',
+        margin: '0',
+        padding: '0'
       }}>
         <div className="elegant-content-card" style={{
           backgroundColor: 'white',
-          borderRadius: '16px',
-          boxShadow: '0 4px 20px rgba(0,0,0,0.1)',
-          padding: '32px',
-          marginBottom: '32px'
+          borderRadius: '0',
+          boxShadow: 'none',
+          padding: '24px',
+          marginBottom: '0',
+          flex: 1,
+          display: 'flex',
+          flexDirection: 'column',
+          minHeight: 'calc(100vh - 80px)',
+          width: '100%'
         }}>
           {/* Creador elegante de listas */}
           <ElegantListCreator />
@@ -2149,7 +2343,12 @@ ${participants.map((p, i) => `${i + 1}. ${p}: ${sharePerPerson.toFixed(2)} €`)
             <div className="elegant-empty-state" style={{
               textAlign: 'center',
               padding: '40px 20px',
-              color: '#6B7280'
+              color: '#6B7280',
+              flex: 1,
+              display: 'flex',
+              flexDirection: 'column',
+              justifyContent: 'center',
+              alignItems: 'center'
             }}>
               <svg width="64" height="64" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ marginBottom: '16px', opacity: 0.5 }}>
                 <path d="M9 5H7C5.89543 5 5 5.89543 5 7V19C5 20.1046 5.89543 21 7 21H17C18.1046 21 19 20.1046 19 19V7C19 5.89543 18.1046 5 17 5H15M9 5C9 6.10457 9.89543 7 11 7H13C14.1046 7 15 6.10457 15 5M9 5C9 3.89543 9.89543 3 11 3H13C14.1046 3 15 3.89543 15 5M12 12H15M12 16H15M9 12H9.01M9 16H9.01" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
@@ -2159,9 +2358,9 @@ ${participants.map((p, i) => `${i + 1}. ${p}: ${sharePerPerson.toFixed(2)} €`)
             </div>
           )}
 
-          {/* Sección de items */}
+          {/* Sección de items - SOLO se muestra si hay una lista seleccionada */}
           {currentList && (
-            <div className="elegant-items-section">
+            <div className="elegant-items-section" style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
               <div className="section-header" style={{
                 display: 'flex',
                 alignItems: 'center',
@@ -2197,7 +2396,7 @@ ${participants.map((p, i) => `${i + 1}. ${p}: ${sharePerPerson.toFixed(2)} €`)
 
               {/* Lista de items */}
               {items.length > 0 ? (
-                <div className="elegant-items-container">
+                <div className="elegant-items-container" style={{ flex: 1, overflow: 'auto' }}>
                   {/* Items pendientes agrupados por categoría */}
                   {Object.keys(groupedPendingItems).map(category => {
                     const categoryInfo = getCategoryInfo(category);
@@ -2276,6 +2475,7 @@ ${participants.map((p, i) => `${i + 1}. ${p}: ${sharePerPerson.toFixed(2)} €`)
                           fontSize: '18px',
                           flexShrink: 0
                         }}>
+                          ✅
                         </span>
                         <h4 style={{
                           fontSize: '16px',
@@ -2287,6 +2487,17 @@ ${participants.map((p, i) => `${i + 1}. ${p}: ${sharePerPerson.toFixed(2)} €`)
                         }}>
                           Comprado
                         </h4>
+                        <span style={{
+                          fontSize: '14px',
+                          color: '#6B7280',
+                          flexShrink: 0,
+                          backgroundColor: 'rgba(255, 255, 255, 0.7)',
+                          padding: '4px 8px',
+                          borderRadius: '12px',
+                          fontWeight: '500'
+                        }}>
+                          {completedItems.length} {completedItems.length === 1 ? 'item' : 'items'}
+                        </span>
                       </div>
                       <ul className="elegant-items-list" style={{
                         listStyle: 'none',
@@ -2312,7 +2523,8 @@ ${participants.map((p, i) => `${i + 1}. ${p}: ${sharePerPerson.toFixed(2)} €`)
                   flexDirection: 'column',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  minHeight: '200px'
+                  minHeight: '200px',
+                  flex: 1
                 }}>
                   <svg
                     width="64"
@@ -2354,15 +2566,50 @@ ${participants.map((p, i) => `${i + 1}. ${p}: ${sharePerPerson.toFixed(2)} €`)
             </div>
           )}
         </div>
-      </div>
+      </main>
 
-      {/* Modales */}
-      {/* Modal de Compartir */}
+      {/* Modal de Compartir - ESTILO UNIFICADO */}
       {shareDialogOpen && (
-        <div className="modal-overlay">
-          <div className="dialog-modal" style={{ backgroundColor: "white" }}>
-            <div className="dialog-header">
-              <h3 style={{ color: "black" }}>Compartir lista</h3>
+        <div className="modal-overlay" style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0, 0, 0, 0.6)',
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          zIndex: 9999
+        }}>
+          <div className="dialog-modal" style={{
+            backgroundColor: 'white',
+            borderRadius: '12px',
+            boxShadow: '0 10px 30px rgba(0, 0, 0, 0.3)',
+            width: '90%',
+            maxWidth: '500px',
+            maxHeight: '90vh',
+            display: 'flex',
+            flexDirection: 'column',
+            overflow: 'hidden'
+          }}>
+            <div className="dialog-header" style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              padding: '20px 24px 0',
+              borderBottom: '1px solid #e5e7eb',
+              marginBottom: 0,
+              background: 'white'
+            }}>
+              <h3 style={{
+                margin: 0,
+                fontSize: '1.25rem',
+                fontWeight: '600',
+                color: '#1f2937'
+              }}>
+                Compartir Lista
+              </h3>
               <button
                 onClick={() => {
                   setShareDialogOpen(false);
@@ -2370,30 +2617,60 @@ ${participants.map((p, i) => `${i + 1}. ${p}: ${sharePerPerson.toFixed(2)} €`)
                   setEmailToShare("");
                 }}
                 className="close-btn"
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  fontSize: '1.5rem',
+                  cursor: 'pointer',
+                  color: '#6b7280',
+                  padding: '4px',
+                  borderRadius: '4px',
+                  transition: 'all 0.2s',
+                  lineHeight: 1,
+                  width: '32px',
+                  height: '32px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center'
+                }}
+                onMouseEnter={(e) => {
+                  e.target.style.backgroundColor = '#f3f4f6';
+                  e.target.style.color = '#374151';
+                }}
+                onMouseLeave={(e) => {
+                  e.target.style.backgroundColor = 'transparent';
+                  e.target.style.color = '#6b7280';
+                }}
               >
                 ×
               </button>
             </div>
 
-            <div className="dialog-content">
+            <div className="dialog-content" style={{
+              padding: '24px',
+              flex: 1,
+              overflowY: 'auto',
+              background: 'white'
+            }}>
               {/* Mensaje de validación */}
               {emailValidation.message && (
                 <div
                   className={`validation-message ${emailValidation.valid ? 'success' : 'error'}`}
                   style={{
-                    padding: "10px",
-                    borderRadius: "6px",
-                    marginBottom: "15px",
-                    backgroundColor: emailValidation.valid ? "#e8f5e8" : "#ffebee",
-                    color: emailValidation.valid ? "#2e7d32" : "#c62828",
-                    border: `1px solid ${emailValidation.valid ? "#c8e6c9" : "#ffcdd2"}`
+                    padding: "12px",
+                    borderRadius: "8px",
+                    marginBottom: "16px",
+                    backgroundColor: emailValidation.valid ? "#f0f9ff" : "#fef2f2",
+                    color: emailValidation.valid ? "#0369a1" : "#dc2626",
+                    border: `1px solid ${emailValidation.valid ? "#bae6fd" : "#fecaca"}`,
+                    fontSize: "14px"
                   }}
                 >
                   {emailValidation.message}
                 </div>
               )}
 
-              <div className="share-input">
+              <div className="share-input" style={{ display: 'flex', gap: '12px', marginBottom: '20px' }}>
                 <input
                   type="email"
                   value={emailToShare}
@@ -2406,8 +2683,13 @@ ${participants.map((p, i) => `${i + 1}. ${p}: ${sharePerPerson.toFixed(2)} €`)
                   placeholder="Introduce el email del usuario"
                   className="elegant-input"
                   style={{
-                    color: "black",
-                    borderColor: emailValidation.valid ? "#e2e8f0" : "#c62828"
+                    flex: 1,
+                    padding: '12px',
+                    border: `1px solid ${emailValidation.valid ? '#d1d5db' : '#dc2626'}`,
+                    borderRadius: '8px',
+                    fontSize: '16px',
+                    color: '#1f2937',
+                    outline: 'none'
                   }}
                   disabled={loading}
                 />
@@ -2416,8 +2698,25 @@ ${participants.map((p, i) => `${i + 1}. ${p}: ${sharePerPerson.toFixed(2)} €`)
                   disabled={loading || !emailToShare.trim()}
                   className="blue-button"
                   style={{
-                    backgroundColor: "#1e88e5",
-                    opacity: loading ? 0.6 : 1
+                    backgroundColor: loading || !emailToShare.trim() ? '#9ca3af' : '#3b82f6',
+                    color: 'white',
+                    border: 'none',
+                    padding: '12px 20px',
+                    borderRadius: '8px',
+                    cursor: loading || !emailToShare.trim() ? 'not-allowed' : 'pointer',
+                    fontWeight: '500',
+                    transition: 'all 0.2s',
+                    minWidth: '100px'
+                  }}
+                  onMouseEnter={(e) => {
+                    if (!loading && emailToShare.trim()) {
+                      e.target.style.backgroundColor = '#2563eb';
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    if (!loading && emailToShare.trim()) {
+                      e.target.style.backgroundColor = '#3b82f6';
+                    }
                   }}
                 >
                   {loading ? "Comprobando..." : "Compartir"}
@@ -2425,17 +2724,39 @@ ${participants.map((p, i) => `${i + 1}. ${p}: ${sharePerPerson.toFixed(2)} €`)
               </div>
 
               {/* Información adicional */}
-              <div className="share-info" style={{ marginTop: "15px", fontSize: "0.9rem", color: "#666" }}>
-                <p>• El usuario debe tener una cuenta en BuyNote</p>
-                <p>• Podrá ver y modificar los productos de la lista</p>
+              <div className="share-info" style={{ 
+                marginTop: "20px", 
+                fontSize: "0.9rem", 
+                color: "#6b7280",
+                backgroundColor: '#f8fafc',
+                padding: '16px',
+                borderRadius: '8px',
+                border: '1px solid #e5e7eb'
+              }}>
+                <p style={{ margin: '0 0 8px 0' }}>• El usuario debe tener una cuenta en BuyNote</p>
+                <p style={{ margin: '0' }}>• Podrá ver y modificar los productos de la lista</p>
               </div>
 
               {sharedUsers.length > 0 && (
-                <div className="shared-users">
-                  <h4 style={{ color: "black", marginTop: "20px" }}>Compartido con:</h4>
-                  <ul>
+                <div className="shared-users" style={{ marginTop: '20px' }}>
+                  <h4 style={{ 
+                    color: "#1f2937", 
+                    marginBottom: '12px',
+                    fontSize: '1rem',
+                    fontWeight: '600'
+                  }}>
+                    Compartido con:
+                  </h4>
+                  <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
                     {sharedUsers.map((email, index) => (
-                      <li key={`shared-${email || index}`} style={{ color: "black" }}>
+                      <li key={`shared-${email || index}`} style={{ 
+                        color: "#1f2937", 
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        padding: '8px 0',
+                        borderBottom: '1px solid #f3f4f6'
+                      }}>
                         <span>{email}</span>
                         <button
                           onClick={() => {
@@ -2445,6 +2766,16 @@ ${participants.map((p, i) => `${i + 1}. ${p}: ${sharePerPerson.toFixed(2)} €`)
                           }}
                           className="unshare-btn"
                           disabled={loading}
+                          style={{
+                            backgroundColor: '#ef4444',
+                            color: 'white',
+                            border: 'none',
+                            padding: '6px 12px',
+                            borderRadius: '6px',
+                            cursor: 'pointer',
+                            fontSize: '12px',
+                            fontWeight: '500'
+                          }}
                         >
                           Eliminar
                         </button>
@@ -2455,7 +2786,14 @@ ${participants.map((p, i) => `${i + 1}. ${p}: ${sharePerPerson.toFixed(2)} €`)
               )}
             </div>
 
-            <div className="dialog-buttons">
+            <div className="dialog-buttons" style={{
+              display: 'flex',
+              gap: '12px',
+              justifyContent: 'flex-end',
+              padding: '0 24px 24px',
+              flexWrap: 'wrap',
+              background: 'white'
+            }}>
               <button
                 onClick={() => {
                   setShareDialogOpen(false);
@@ -2463,8 +2801,25 @@ ${participants.map((p, i) => `${i + 1}. ${p}: ${sharePerPerson.toFixed(2)} €`)
                   setEmailToShare("");
                 }}
                 className="cancel-btn"
-                style={{ color: "black" }}
-                disabled={loading}
+                style={{
+                  backgroundColor: '#f3f4f6',
+                  color: '#374151',
+                  border: '1px solid #d1d5db',
+                  padding: '10px 20px',
+                  borderRadius: '8px',
+                  cursor: 'pointer',
+                  fontWeight: '500',
+                  transition: 'all 0.2s',
+                  minWidth: '80px'
+                }}
+                onMouseEnter={(e) => {
+                  e.target.style.backgroundColor = '#e5e7eb';
+                  e.target.style.borderColor = '#9ca3af';
+                }}
+                onMouseLeave={(e) => {
+                  e.target.style.backgroundColor = '#f3f4f6';
+                  e.target.style.borderColor = '#d1d5db';
+                }}
               >
                 Cerrar
               </button>
@@ -2473,35 +2828,132 @@ ${participants.map((p, i) => `${i + 1}. ${p}: ${sharePerPerson.toFixed(2)} €`)
         </div>
       )}
 
-      {/* Modal de Dejar de Compartir */}
+      {/* Modal de Dejar de Compartir - ESTILO UNIFICADO */}
       {unshareDialogOpen && (
-        <div className="modal-overlay">
-          <div className="dialog-modal" style={{ backgroundColor: "white" }}>
-            <div className="dialog-header">
-              <h3 style={{ color: "black" }}>Dejar de compartir</h3>
+        <div className="modal-overlay" style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0, 0, 0, 0.6)',
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          zIndex: 9999
+        }}>
+          <div className="dialog-modal" style={{
+            backgroundColor: 'white',
+            borderRadius: '12px',
+            boxShadow: '0 10px 30px rgba(0, 0, 0, 0.3)',
+            width: '90%',
+            maxWidth: '400px',
+            maxHeight: '90vh',
+            display: 'flex',
+            flexDirection: 'column',
+            overflow: 'hidden'
+          }}>
+            <div className="dialog-header" style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              padding: '20px 24px 0',
+              borderBottom: '1px solid #e5e7eb',
+              marginBottom: 0,
+              background: 'white'
+            }}>
+              <h3 style={{
+                margin: 0,
+                fontSize: '1.25rem',
+                fontWeight: '600',
+                color: '#1f2937'
+              }}>
+                Dejar de compartir
+              </h3>
               <button
                 onClick={() => {
                   setUnshareDialogOpen(false);
                   setShareDialogOpen(true);
                 }}
                 className="close-btn"
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  fontSize: '1.5rem',
+                  cursor: 'pointer',
+                  color: '#6b7280',
+                  padding: '4px',
+                  borderRadius: '4px',
+                  transition: 'all 0.2s',
+                  lineHeight: 1,
+                  width: '32px',
+                  height: '32px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center'
+                }}
+                onMouseEnter={(e) => {
+                  e.target.style.backgroundColor = '#f3f4f6';
+                  e.target.style.color = '#374151';
+                }}
+                onMouseLeave={(e) => {
+                  e.target.style.backgroundColor = 'transparent';
+                  e.target.style.color = '#6b7280';
+                }}
               >
                 ×
               </button>
             </div>
 
-            <div className="dialog-content">
-              <p style={{ color: "black" }}>¿Dejar de compartir la lista con {userToUnshare}?</p>
+            <div className="dialog-content" style={{
+              padding: '24px',
+              flex: 1,
+              overflowY: 'auto',
+              background: 'white'
+            }}>
+              <p style={{ 
+                color: "#1f2937", 
+                margin: 0,
+                fontSize: '16px',
+                lineHeight: '1.5'
+              }}>
+                ¿Dejar de compartir la lista con <strong>{userToUnshare}</strong>?
+              </p>
             </div>
 
-            <div className="dialog-buttons">
+            <div className="dialog-buttons" style={{
+              display: 'flex',
+              gap: '12px',
+              justifyContent: 'flex-end',
+              padding: '0 24px 24px',
+              flexWrap: 'wrap',
+              background: 'white'
+            }}>
               <button
                 onClick={() => {
                   setUnshareDialogOpen(false);
                   setShareDialogOpen(true);
                 }}
                 className="cancel-btn"
-                style={{ color: "black" }}
+                style={{
+                  backgroundColor: '#f3f4f6',
+                  color: '#374151',
+                  border: '1px solid #d1d5db',
+                  padding: '10px 20px',
+                  borderRadius: '8px',
+                  cursor: 'pointer',
+                  fontWeight: '500',
+                  transition: 'all 0.2s',
+                  minWidth: '80px'
+                }}
+                onMouseEnter={(e) => {
+                  e.target.style.backgroundColor = '#e5e7eb';
+                  e.target.style.borderColor = '#9ca3af';
+                }}
+                onMouseLeave={(e) => {
+                  e.target.style.backgroundColor = '#f3f4f6';
+                  e.target.style.borderColor = '#d1d5db';
+                }}
               >
                 Cancelar
               </button>
@@ -2509,7 +2961,27 @@ ${participants.map((p, i) => `${i + 1}. ${p}: ${sharePerPerson.toFixed(2)} €`)
                 onClick={unshareList}
                 disabled={loading}
                 className="confirm-delete-btn"
-                style={{ backgroundColor: "red" }}
+                style={{
+                  backgroundColor: '#ef4444',
+                  color: 'white',
+                  border: 'none',
+                  padding: '10px 20px',
+                  borderRadius: '8px',
+                  cursor: 'pointer',
+                  fontWeight: '500',
+                  transition: 'all 0.2s',
+                  minWidth: '100px'
+                }}
+                onMouseEnter={(e) => {
+                  if (!loading) {
+                    e.target.style.backgroundColor = '#dc2626';
+                  }
+                }}
+                onMouseLeave={(e) => {
+                  if (!loading) {
+                    e.target.style.backgroundColor = '#ef4444';
+                  }
+                }}
               >
                 Confirmar
               </button>
@@ -2518,36 +2990,149 @@ ${participants.map((p, i) => `${i + 1}. ${p}: ${sharePerPerson.toFixed(2)} €`)
         </div>
       )}
 
-      {/* Modal de Confirmación de Eliminación de Item */}
+      {/* Modal de Confirmación de Eliminación de Item - ESTILO UNIFICADO */}
       {confirmDelete && (
-        <div className="modal-overlay">
-          <div className="dialog-modal" style={{ backgroundColor: "white" }}>
-            <div className="dialog-header">
-              <h3 style={{ color: "black" }}>Confirmar eliminación</h3>
+        <div className="modal-overlay" style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0, 0, 0, 0.6)',
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          zIndex: 9999
+        }}>
+          <div className="dialog-modal" style={{
+            backgroundColor: 'white',
+            borderRadius: '12px',
+            boxShadow: '0 10px 30px rgba(0, 0, 0, 0.3)',
+            width: '90%',
+            maxWidth: '400px',
+            maxHeight: '90vh',
+            display: 'flex',
+            flexDirection: 'column',
+            overflow: 'hidden'
+          }}>
+            <div className="dialog-header" style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              padding: '20px 24px 0',
+              borderBottom: '1px solid #e5e7eb',
+              marginBottom: 0,
+              background: 'white'
+            }}>
+              <h3 style={{
+                margin: 0,
+                fontSize: '1.25rem',
+                fontWeight: '600',
+                color: '#1f2937'
+              }}>
+                Confirmar eliminación
+              </h3>
               <button
                 onClick={() => setConfirmDelete(null)}
                 className="close-btn"
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  fontSize: '1.5rem',
+                  cursor: 'pointer',
+                  color: '#6b7280',
+                  padding: '4px',
+                  borderRadius: '4px',
+                  transition: 'all 0.2s',
+                  lineHeight: 1,
+                  width: '32px',
+                  height: '32px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center'
+                }}
+                onMouseEnter={(e) => {
+                  e.target.style.backgroundColor = '#f3f4f6';
+                  e.target.style.color = '#374151';
+                }}
+                onMouseLeave={(e) => {
+                  e.target.style.backgroundColor = 'transparent';
+                  e.target.style.color = '#6b7280';
+                }}
               >
                 ×
               </button>
             </div>
 
-            <div className="dialog-content">
-              <p style={{ color: "black" }}>¿Eliminar "{confirmDelete.text}"?</p>
+            <div className="dialog-content" style={{
+              padding: '24px',
+              flex: 1,
+              overflowY: 'auto',
+              background: 'white'
+            }}>
+              <p style={{ 
+                color: "#1f2937", 
+                margin: 0,
+                fontSize: '16px',
+                lineHeight: '1.5'
+              }}>
+                ¿Eliminar "<strong>{confirmDelete.text}</strong>"?
+              </p>
             </div>
 
-            <div className="dialog-buttons">
+            <div className="dialog-buttons" style={{
+              display: 'flex',
+              gap: '12px',
+              justifyContent: 'flex-end',
+              padding: '0 24px 24px',
+              flexWrap: 'wrap',
+              background: 'white'
+            }}>
               <button
                 onClick={() => setConfirmDelete(null)}
                 className="cancel-btn"
-                style={{ color: "black" }}
+                style={{
+                  backgroundColor: '#f3f4f6',
+                  color: '#374151',
+                  border: '1px solid #d1d5db',
+                  padding: '10px 20px',
+                  borderRadius: '8px',
+                  cursor: 'pointer',
+                  fontWeight: '500',
+                  transition: 'all 0.2s',
+                  minWidth: '80px'
+                }}
+                onMouseEnter={(e) => {
+                  e.target.style.backgroundColor = '#e5e7eb';
+                  e.target.style.borderColor = '#9ca3af';
+                }}
+                onMouseLeave={(e) => {
+                  e.target.style.backgroundColor = '#f3f4f6';
+                  e.target.style.borderColor = '#d1d5db';
+                }}
               >
                 Cancelar
               </button>
               <button
                 onClick={() => deleteItem(confirmDelete.id)}
                 className="confirm-delete-btn"
-                style={{ backgroundColor: "red" }}
+                style={{
+                  backgroundColor: '#ef4444',
+                  color: 'white',
+                  border: 'none',
+                  padding: '10px 20px',
+                  borderRadius: '8px',
+                  cursor: 'pointer',
+                  fontWeight: '500',
+                  transition: 'all 0.2s',
+                  minWidth: '80px'
+                }}
+                onMouseEnter={(e) => {
+                  e.target.style.backgroundColor = '#dc2626';
+                }}
+                onMouseLeave={(e) => {
+                  e.target.style.backgroundColor = '#ef4444';
+                }}
               >
                 Eliminar
               </button>
@@ -2556,29 +3141,134 @@ ${participants.map((p, i) => `${i + 1}. ${p}: ${sharePerPerson.toFixed(2)} €`)
         </div>
       )}
 
-      {/* Modal de Confirmación de Eliminación de Lista */}
+      {/* Modal de Confirmación de Eliminación de Lista - ESTILO UNIFICADO */}
       {confirmListDelete && (
-        <div className="modal-overlay">
-          <div className="dialog-modal" style={{ backgroundColor: "white" }}>
-            <div className="dialog-header">
-              <h3 style={{ color: "black" }}>Confirmar eliminación</h3>
+        <div className="modal-overlay" style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0, 0, 0, 0.6)',
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          zIndex: 9999
+        }}>
+          <div className="dialog-modal" style={{
+            backgroundColor: 'white',
+            borderRadius: '12px',
+            boxShadow: '0 10px 30px rgba(0, 0, 0, 0.3)',
+            width: '90%',
+            maxWidth: '450px',
+            maxHeight: '90vh',
+            display: 'flex',
+            flexDirection: 'column',
+            overflow: 'hidden'
+          }}>
+            <div className="dialog-header" style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              padding: '20px 24px 0',
+              borderBottom: '1px solid #e5e7eb',
+              marginBottom: 0,
+              background: 'white'
+            }}>
+              <h3 style={{
+                margin: 0,
+                fontSize: '1.25rem',
+                fontWeight: '600',
+                color: '#1f2937'
+              }}>
+                Confirmar eliminación
+              </h3>
               <button
                 onClick={() => setConfirmListDelete(null)}
                 className="close-btn"
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  fontSize: '1.5rem',
+                  cursor: 'pointer',
+                  color: '#6b7280',
+                  padding: '4px',
+                  borderRadius: '4px',
+                  transition: 'all 0.2s',
+                  lineHeight: 1,
+                  width: '32px',
+                  height: '32px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center'
+                }}
+                onMouseEnter={(e) => {
+                  e.target.style.backgroundColor = '#f3f4f6';
+                  e.target.style.color = '#374151';
+                }}
+                onMouseLeave={(e) => {
+                  e.target.style.backgroundColor = 'transparent';
+                  e.target.style.color = '#6b7280';
+                }}
               >
                 ×
               </button>
             </div>
 
-            <div className="dialog-content">
-              <p style={{ color: "black" }}>¿Eliminar la lista "{confirmListDelete.name}" y todos sus productos?</p>
+            <div className="dialog-content" style={{
+              padding: '24px',
+              flex: 1,
+              overflowY: 'auto',
+              background: 'white'
+            }}>
+              <p style={{ 
+                color: "#1f2937", 
+                margin: 0,
+                fontSize: '16px',
+                lineHeight: '1.5'
+              }}>
+                ¿Eliminar la lista "<strong>{confirmListDelete.name}</strong>" y todos sus productos?
+              </p>
+              <p style={{
+                color: "#ef4444",
+                margin: '12px 0 0 0',
+                fontSize: '14px',
+                fontWeight: '500'
+              }}>
+                Esta acción no se puede deshacer
+              </p>
             </div>
 
-            <div className="dialog-buttons">
+            <div className="dialog-buttons" style={{
+              display: 'flex',
+              gap: '12px',
+              justifyContent: 'flex-end',
+              padding: '0 24px 24px',
+              flexWrap: 'wrap',
+              background: 'white'
+            }}>
               <button
                 onClick={() => setConfirmListDelete(null)}
                 className="cancel-btn"
-                style={{ color: "black" }}
+                style={{
+                  backgroundColor: '#f3f4f6',
+                  color: '#374151',
+                  border: '1px solid #d1d5db',
+                  padding: '10px 20px',
+                  borderRadius: '8px',
+                  cursor: 'pointer',
+                  fontWeight: '500',
+                  transition: 'all 0.2s',
+                  minWidth: '80px'
+                }}
+                onMouseEnter={(e) => {
+                  e.target.style.backgroundColor = '#e5e7eb';
+                  e.target.style.borderColor = '#9ca3af';
+                }}
+                onMouseLeave={(e) => {
+                  e.target.style.backgroundColor = '#f3f4f6';
+                  e.target.style.borderColor = '#d1d5db';
+                }}
               >
                 Cancelar
               </button>
@@ -2587,8 +3277,28 @@ ${participants.map((p, i) => `${i + 1}. ${p}: ${sharePerPerson.toFixed(2)} €`)
                   deleteList(confirmListDelete.id);
                 }}
                 className="confirm-delete-btn"
-                style={{ backgroundColor: "red" }}
+                style={{
+                  backgroundColor: '#ef4444',
+                  color: 'white',
+                  border: 'none',
+                  padding: '10px 20px',
+                  borderRadius: '8px',
+                  cursor: 'pointer',
+                  fontWeight: '500',
+                  transition: 'all 0.2s',
+                  minWidth: '100px'
+                }}
                 disabled={loading}
+                onMouseEnter={(e) => {
+                  if (!loading) {
+                    e.target.style.backgroundColor = '#dc2626';
+                  }
+                }}
+                onMouseLeave={(e) => {
+                  if (!loading) {
+                    e.target.style.backgroundColor = '#ef4444';
+                  }
+                }}
               >
                 {loading ? "Eliminando..." : "Eliminar"}
               </button>
@@ -2597,7 +3307,7 @@ ${participants.map((p, i) => `${i + 1}. ${p}: ${sharePerPerson.toFixed(2)} €`)
         </div>
       )}
 
-      {/* Modal de Observaciones */}
+      {/* Modal de Observaciones - YA ESTÁ CORRECTO */}
       {observationsDialogOpen && (
         <div className="modal-overlay" style={{
           position: 'fixed',
@@ -3126,161 +3836,7 @@ ${participants.map((p, i) => `${i + 1}. ${p}: ${sharePerPerson.toFixed(2)} €`)
               </button>
             </div>
 
-            <div className="dialog-content" style={{
-              padding: '24px',
-              flex: 1,
-              overflowY: 'auto',
-              background: 'white'
-            }}>
-              {(() => {
-                const totalPrice = purchaseInfo[currentList]?.totalPrice ||
-                  Object.values(itemPrices[currentList] || {}).reduce((sum, price) => sum + price.amount, 0);
-                const participants = [auth.currentUser?.email || "Tú", ...(allLists.find(list => list.id === currentList)?.sharedWith || [])];
-
-                if (!totalPrice || totalPrice === 0) {
-                  return (
-                    <p style={{ color: 'black' }}>
-                      Primero establece el precio total de la compra usando 'Finalizar Compra'
-                    </p>
-                  );
-                }
-
-                const sharePerPerson = totalPrice / participants.length;
-
-                return (
-                  <div className="split-result" style={{
-                    backgroundColor: '#f8fafc',
-                    padding: '20px',
-                    borderRadius: '8px',
-                    margin: '16px 0'
-                  }}>
-                    <p style={{ color: 'black', marginBottom: '8px' }}>
-                      <strong>Total:</strong> {totalPrice.toFixed(2)} €
-                    </p>
-                    <p style={{ color: 'black', marginBottom: '8px' }}>
-                      <strong>Personas:</strong> {participants.length}
-                    </p>
-                    <p style={{ color: 'black', marginBottom: '16px' }}>
-                      <strong>Por persona:</strong> {sharePerPerson.toFixed(2)} €
-                    </p>
-                    <div className="participants-list">
-                      {participants.map((participant, index) => (
-                        <div
-                          key={index}
-                          className="participant"
-                          style={{
-                            color: 'black',
-                            display: 'flex',
-                            justifyContent: 'space-between',
-                            alignItems: 'center',
-                            padding: '8px 0',
-                            borderBottom: '1px solid #e5e7eb'
-                          }}
-                        >
-                          <span>{participant}</span>
-                          <strong>{sharePerPerson.toFixed(2)} €</strong>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                );
-              })()}
-            </div>
-
-            <div className="dialog-buttons" style={{
-              display: 'flex',
-              gap: '12px',
-              justifyContent: 'flex-end',
-              padding: '0 24px 24px',
-              flexWrap: 'wrap',
-              background: 'white'
-            }}>
-              <button
-                onClick={() => setSplitDialogOpen(false)}
-                className="cancel-btn"
-                style={{
-                  backgroundColor: '#f3f4f6',
-                  color: '#374151',
-                  border: '1px solid #d1d5db',
-                  padding: '10px 20px',
-                  borderRadius: '8px',
-                  cursor: 'pointer',
-                  fontWeight: '500',
-                  transition: 'all 0.2s',
-                  minWidth: '80px'
-                }}
-                onMouseEnter={(e) => {
-                  e.target.style.backgroundColor = '#e5e7eb';
-                  e.target.style.borderColor = '#9ca3af';
-                }}
-                onMouseLeave={(e) => {
-                  e.target.style.backgroundColor = '#f3f4f6';
-                  e.target.style.borderColor = '#d1d5db';
-                }}
-              >
-                Cerrar
-              </button>
-              <button
-                onClick={() => {
-                  const totalPrice = purchaseInfo[currentList]?.totalPrice ||
-                    Object.values(itemPrices[currentList] || {}).reduce((sum, price) => sum + price.amount, 0);
-                  const participants = [auth.currentUser?.email || "Tú", ...(allLists.find(list => list.id === currentList)?.sharedWith || [])];
-                  splitExpenses(totalPrice, participants);
-                }}
-                className="blue-button"
-                style={{
-                  backgroundColor: '#3b82f6',
-                  color: 'white',
-                  border: 'none',
-                  padding: '10px 20px',
-                  borderRadius: '8px',
-                  cursor: 'pointer',
-                  fontWeight: '500',
-                  transition: 'all 0.2s',
-                  minWidth: '80px'
-                }}
-                onMouseEnter={(e) => {
-                  e.target.style.backgroundColor = '#2563eb';
-                }}
-                onMouseLeave={(e) => {
-                  e.target.style.backgroundColor = '#3b82f6';
-                }}
-              >
-                Calcular
-              </button>
-              <button
-                onClick={() => {
-                  const totalPrice = purchaseInfo[currentList]?.totalPrice ||
-                    Object.values(itemPrices[currentList] || {}).reduce((sum, price) => sum + price.amount, 0);
-                  const participants = [auth.currentUser?.email || "Tú", ...(allLists.find(list => list.id === currentList)?.sharedWith || [])];
-                  const sharePerPerson = totalPrice / participants.length;
-                  const result = `Resumen de Gastos\n\nTotal gastado: ${totalPrice.toFixed(2)} €\nNúmero de personas: ${participants.length}\nPrecio por persona: ${sharePerPerson.toFixed(2)} €\n\n${participants.map((p, i) => `${i + 1}. ${p}: ${sharePerPerson.toFixed(2)} €`).join('\n')}`;
-
-                  navigator.clipboard.writeText(result);
-                  showToast("Resumen copiado al portapapeles", 'success');
-                }}
-                className="blue-button"
-                style={{
-                  backgroundColor: '#10b981',
-                  color: 'white',
-                  border: 'none',
-                  padding: '10px 20px',
-                  borderRadius: '8px',
-                  cursor: 'pointer',
-                  fontWeight: '500',
-                  transition: 'all 0.2s',
-                  minWidth: '80px'
-                }}
-                onMouseEnter={(e) => {
-                  e.target.style.backgroundColor = '#059669';
-                }}
-                onMouseLeave={(e) => {
-                  e.target.style.backgroundColor = '#10b981';
-                }}
-              >
-                Copiar
-              </button>
-            </div>
+            <SplitDialogContent />
           </div>
         </div>
       )}
@@ -3323,12 +3879,12 @@ ${participants.map((p, i) => `${i + 1}. ${p}: ${sharePerPerson.toFixed(2)} €`)
           background-color: white;
           box-shadow: 0 2px 10px rgba(0,0,0,0.1);
           padding: 16px 0;
-          margin-bottom: 24px;
+          flex-shrink: 0;
           width: 100%;
         }
         
         .navbar-content {
-          max-width: 1200px;
+          max-width: 100%;
           margin: 0 auto;
           padding: 0 20px;
           display: flex;
@@ -3351,19 +3907,25 @@ ${participants.map((p, i) => `${i + 1}. ${p}: ${sharePerPerson.toFixed(2)} €`)
         }
         
         .elegant-main-content {
-          max-width: 1200px;
-          margin: 0 auto;
-          padding: 0 20px;
+          flex: 1;
+          display: flex;
+          flex-direction: column;
+          max-width: 100%;
+          margin: 0;
+          padding: 0;
           width: 100%;
         }
         
         .elegant-content-card {
           background-color: var(--white);
-          padding: 25px;
-          border-radius: 12px;
-          box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-          border: 1px solid #e0e0e0;
-          margin: 0 auto;
+          border-radius: 0;
+          box-shadow: none;
+          padding: 24px;
+          margin-bottom: 0;
+          flex: 1;
+          display: flex;
+          flexDirection: column;
+          minHeight: calc(100vh - 80px);
           width: 100%;
         }
         
@@ -3532,6 +4094,9 @@ ${participants.map((p, i) => `${i + 1}. ${p}: ${sharePerPerson.toFixed(2)} €`)
         .elegant-items-section {
           margin-top: 20px;
           width: 100%;
+          flex: 1;
+          display: flex;
+          flex-direction: column;
         }
         
         .section-header {
@@ -3696,490 +4261,60 @@ ${participants.map((p, i) => `${i + 1}. ${p}: ${sharePerPerson.toFixed(2)} €`)
           padding-left: 8px;
         }
         
-      /* ===== ESTILOS PARA MODALES CENTRADOS ===== */
-      .modal-overlay {
-        position: fixed !important;
-        top: 0 !important;
-        left: 0 !important;
-        right: 0 !important;
-        bottom: 0 !important;
-        background-color: rgba(0, 0, 0, 0.6) !important;
-        display: flex !important;
-        justify-content: center !important;
-        align-items: center !important;
-        z-index: 9999 !important;
-        padding: 20px;
-        animation: fadeIn 0.2s ease-out;
-      }
-
-      .dialog-modal {
-        background: white !important;
-        border-radius: 12px;
-        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
-        width: 100%;
-        max-width: 500px;
-        max-height: 90vh;
-        display: flex;
-        flex-direction: column;
-        animation: slideUp 0.3s ease-out;
-        overflow: hidden;
-        position: relative;
-        z-index: 10000;
-        margin: auto;
-      }
-
-      .dialog-header {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        padding: 20px 24px 0;
-        border-bottom: 1px solid #e5e7eb;
-        margin-bottom: 0;
-        background: white;
-      }
-
-      .dialog-header h3 {
-        margin: 0;
-        font-size: 1.25rem;
-        font-weight: 600;
-        color: #1f2937;
-      }
-
-      .close-btn {
-        background: none;
-        border: none;
-        font-size: 1.5rem;
-        cursor: pointer;
-        color: #6b7280;
-        padding: 4px;
-        border-radius: 4px;
-        transition: all 0.2s;
-        lineHeight: 1;
-        width: 32px;
-        height: 32px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-      }
-
-      .close-btn:hover {
-        background-color: #f3f4f6;
-        color: #374151;
-      }
-
-      .dialog-content {
-        padding: 24px;
-        flex: 1;
-        overflow-y: auto;
-        background: white;
-      }
-
-      .dialog-buttons {
-        display: flex;
-        gap: 12px;
-        justify-content: flex-end;
-        padding: 0 24px 24px;
-        flex-wrap: wrap;
-        background: white;
-      }
-
-      /* Botones de los modales */
-      .cancel-btn {
-        background-color: #f3f4f6;
-        color: #374151;
-        border: 1px solid #d1d5db;
-        padding: 10px 20px;
-        border-radius: 8px;
-        cursor: pointer;
-        font-weight: 500;
-        transition: all 0.2s;
-        min-width: 80px;
-      }
-
-      .cancel-btn:hover {
-        background-color: #e5e7eb;
-        border-color: #9ca3af;
-      }
-
-      .confirm-delete-btn {
-        background-color: #dc2626;
-        color: white;
-        border: none;
-        padding: 10px 20px;
-        border-radius: 8px;
-        cursor: pointer;
-        font-weight: 500;
-        transition: all 0.2s;
-        min-width: 80px;
-      }
-
-      .confirm-delete-btn:hover {
-        background-color: #b91c1c;
-      }
-
-      .confirm-delete-btn:disabled {
-        background-color: #9ca3af;
-        cursor: not-allowed;
-      }
-
-      /* Campos de formulario en modales */
-      .elegant-input, .elegant-textarea {
-        background-color: white !important;
-        color: #1f2937;
-      }
-
-      .elegant-input:focus, .elegant-textarea:focus {
-        background-color: white !important;
-      }
-
-      /* Estilos específicos para el modal de compartir */
-      .share-input {
-        display: flex;
-        gap: 12px;
-        margin-bottom: 20px;
-        flex-wrap: wrap;
-      }
-
-      .share-input .elegant-input {
-        flex: 1;
-        min-width: 200px;
-      }
-
-      .share-info {
-        background-color: #f8fafc;
-        padding: 16px;
-        border-radius: 8px;
-        border-left: 4px solid #3b82f6;
-        margin: 16px 0;
-      }
-
-      .share-info p {
-        margin: 4px 0;
-        font-size: 0.9rem;
-        color: #4b5563;
-      }
-
-      .shared-users {
-        margin-top: 20px;
-      }
-
-      .shared-users h4 {
-        margin: 0 0 12px 0;
-        font-size: 1rem;
-        color: #374151;
-      }
-
-      .shared-users ul {
-        list-style: none;
-        padding: 0;
-        margin: 0;
-      }
-
-      .shared-users li {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        padding: 12px 0;
-        border-bottom: 1px solid #e5e7eb;
-        flex-wrap: wrap;
-        gap: 8px;
-      }
-
-      .shared-users li:last-child {
-        border-bottom: none;
-      }
-
-      .unshare-btn {
-        background-color: #ef4444;
-        color: white;
-        border: none;
-        padding: 6px 12px;
-        border-radius: 6px;
-        cursor: pointer;
-        font-size: 0.875rem;
-        transition: all 0.2s;
-        white-space: nowrap;
-      }
-
-      .unshare-btn:hover {
-        background-color: #dc2626;
-      }
-
-      .unshare-btn:disabled {
-        background-color: #9ca3af;
-        cursor: not-allowed;
-      }
-
-      /* Estilos para división de gastos */
-      .split-result {
-        background-color: #f8fafc;
-        padding: 20px;
-        border-radius: 8px;
-        margin: 16px 0;
-      }
-
-      .split-result p {
-        margin: 8px 0;
-        color: #374151;
-      }
-
-      .participants-list {
-        margin-top: 16px;
-      }
-
-      .participant {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        padding: 8px 0;
-        border-bottom: 1px solid #e5e7eb;
-        flex-wrap: wrap;
-      }
-
-      .participant:last-child {
-        border-bottom: none;
-      }
-
-      /* Mensajes de validación */
-      .validation-message {
-        padding: 12px 16px;
-        border-radius: 8px;
-        margin-bottom: 16px;
-        font-size: 0.9rem;
-      }
-
-      .validation-message.success {
-        background-color: #d1fae5;
-        color: #065f46;
-        border: 1px solid #a7f3d0;
-      }
-
-      .validation-message.error {
-        background-color: #fee2e2;
-        color: #991b1b;
-        border: 1px solid #fecaca;
-      }
-
-      /* Animaciones */
-      @keyframes fadeIn {
-        from {
-          opacity: 0;
-        }
-        to {
-          opacity: 1;
-        }
-      }
-
-      @keyframes slideUp {
-        from {
-          opacity: 0;
-          transform: translateY(20px) scale(0.95);
-        }
-        to {
-          opacity: 1;
-          transform: translateY(0) scale(1);
-        }
-      }
-
-      @keyframes spin {
-        0% { transform: rotate(0deg); }
-        100% { transform: rotate(360deg); }
-      }
-      
-      .elegant-spinner {
-        animation: spin 1s linear infinite;
-      }
-
-      /* Responsive para modales */
-      @media (max-width: 640px) {
-        .modal-overlay {
-          padding: 10px;
-        }
-        
-        .dialog-modal {
-          max-width: 100%;
-          max-height: 95vh;
-        }
-        
-        .dialog-header {
-          padding: 16px 20px 0;
-        }
-        
-        .dialog-content {
-          padding: 20px;
-        }
-        
-        .dialog-buttons {
-          padding: 0 20px 20px;
-          flex-direction: column;
-        }
-        
-        .dialog-buttons button {
-          width: 100%;
-        }
-        
-        .share-input {
-          flex-direction: column;
-        }
-        
-        .close-btn {
-          width: 28px;
-          height: 28px;
-          font-size: 1.25rem;
-        }
-
-        .elegant-list-creator {
-          flex-direction: column;
-        }
-
-        .elegant-item-adder {
-          flex-direction: column;
-        }
-
-        .selector-header {
-          flex-direction: column;
-          align-items: flex-start;
-        }
-
-        .list-actions {
-          width: 100%;
-          justify-content: flex-start;
-        }
-
-        .section-header {
-          flex-direction: column;
-          align-items: flex-start;
-        }
-
-        .item-content {
-          flex-direction: column;
-          align-items: flex-start;
-          gap: 8px;
-        }
-
-        .item-actions {
-          width: 100%;
-          justify-content: flex-end;
-          margin-top: 8px;
-        }
-      }
-
-      /* Scroll personalizado para modales */
-      .dialog-content::-webkit-scrollbar {
-        width: 6px;
-      }
-
-      .dialog-content::-webkit-scrollbar-track {
-        background: #f1f1f1;
-        border-radius: 3px;
-      }
-
-      .dialog-content::-webkit-scrollbar-thumb {
-        background: #c1c1c1;
-        border-radius: 3px;
-      }
-
-      .dialog-content::-webkit-scrollbar-thumb:hover {
-        background: #a8a8a8;
-      }
-
-      /* Estilos adicionales para la sección de información de lista */
-        .list-info-section {
-          background-color: #f8f9fa;
-          border-radius: 8px;
-          padding: 16px;
-          margin-bottom: 20px;
-          border: 1px solid #e9ecef;
-        }
-
-        .list-info-header {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          margin-bottom: 12px;
-          flex-wrap: wrap;
-          gap: 8px;
-        }
-
-        .list-info-header h4 {
-          margin: 0;
-          color: #495057;
-          font-size: 1.1rem;
-        }
-
-        .list-info-actions {
-          display: flex;
-          gap: 8px;
-          flex-wrap: wrap;
-        }
-
-        .list-info-actions .action-btn {
-          background: none;
-          border: 1px solid #dee2e6;
-          padding: 6px 10px;
-          border-radius: 6px;
-          cursor: pointer;
-          font-size: 1.2rem;
-          transition: all 0.2s;
-        }
-
-        .list-info-actions .action-btn:hover {
-          background-color: #e9ecef;
-        }
-
-        .price-info {
-          margin-bottom: 10px;
-          font-size: 1rem;
-        }
-
-        .extra-info, .observations-preview {
-          margin-top: 10px;
-          padding: 10px;
-          background-color: white;
-          border-radius: 6px;
-          border-left: 4px solid #007bff;
-        }
-
-        .extra-info p, .observations-preview p {
-          margin: 5px 0 0 0;
-          color: #6c757d;
-          font-size: 0.9rem;
-        }
-
-        .purchaser-info, .added-by-info {
-          display: block;
-          margin-top: 2px;
-        }
-
-        .price-tag {
-          background-color: #e7f3ff;
-          color: #0066cc;
-          padding: 2px 6px;
-          border-radius: 4px;
-          font-size: 0.8rem;
-          font-weight: bold;
-        }
-
-        .price-btn {
-          background: none;
-          border: 1px solid #28a745;
-          color: #28a745;
-          padding: 4px 8px;
-          border-radius: 4px;
-          cursor: pointer;
-          font-size: 0.9rem;
-          transition: all 0.2s;
-        }
-
-        .price-btn:hover {
-          background-color: #28a745;
-          color: white;
-        }
-
-        /* Responsive adicional */
-        @media (max-width: 480px) {
+        /* Responsive para móviles */
+        @media (max-width: 768px) {
           .elegant-content-card {
             padding: 16px;
+          }
+          
+          .elegant-list-creator {
+            flex-direction: column;
+            gap: 12px;
+            padding: 12px;
+          }
+          
+          .elegant-item-adder {
+            flex-direction: column;
+            gap: 12px;
+          }
+          
+          .selector-header {
+            flex-direction: column;
+            align-items: flex-start;
+          }
+          
+          .list-actions {
+            width: 100%;
+            justify-content: flex-start;
+          }
+          
+          .section-header {
+            flex-direction: column;
+            align-items: flex-start;
+          }
+          
+          .category-header {
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 8px;
+          }
+          
+          .item-content {
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 8px;
+          }
+          
+          .item-actions {
+            width: 100%;
+            justify-content: flex-end;
+            margin-top: 8px;
+          }
+        }
+        
+        @media (max-width: 480px) {
+          .elegant-content-card {
+            padding: 12px;
           }
           
           .navbar-content {
@@ -4190,24 +4325,45 @@ ${participants.map((p, i) => `${i + 1}. ${p}: ${sharePerPerson.toFixed(2)} €`)
           .elegant-navbar {
             padding: 12px 0;
           }
+        }
+
+        /* Para pantallas grandes */
+        @media (min-width: 1200px) {
+          .elegant-content-card {
+            max-width: 1200px;
+            margin: 0 auto;
+            border-radius: 16px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+            margin: 0 auto 32px;
+            min-height: auto;
+          }
           
           .elegant-main-content {
-            padding: 0 16px;
+            padding: 0 20px;
           }
         }
 
-        @media (max-width: 768px) {
-          .category-header {
-            flex-direction: column;
-            align-items: flex-start;
-            gap: 8px;
+        /* Animaciones */
+        @keyframes spin {
+          0% { transform: rotate(0deg); }
+          100% { transform: rotate(360deg); }
+        }
+        
+        .elegant-spinner {
+          animation: spin 1s linear infinite;
+        }
+
+        /* Mejoras de accesibilidad */
+        @media (prefers-reduced-motion: reduce) {
+          .elegant-item {
+            transition: none;
           }
           
-          .category-header span:last-child {
-            margin-left: 0;
+          .elegant-item:hover {
+            transform: none;
           }
         }
-`}</style>
+      `}</style>
     </div>
   );
 }
