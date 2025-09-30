@@ -4,14 +4,14 @@ import { db, auth } from "../firebase";
 import { collection, addDoc, query, where, onSnapshot, deleteDoc, writeBatch, getDocs, arrayUnion, arrayRemove, getDoc } from "firebase/firestore";
 import { doc, updateDoc, setDoc } from "firebase/firestore";
 import { signOut, onAuthStateChanged } from "firebase/auth";
+import { ToastContainer, toast } from 'react-toastify';
+import 'react-toastify/dist/ReactToastify.css';
 
 export function ShoppingList() {
   const [items, setItems] = useState([]);
-  const [newItem, setNewItem] = useState("");
   const [lists, setLists] = useState([]);
   const [sharedLists, setSharedLists] = useState([]);
   const [currentList, setCurrentList] = useState("");
-  const [newListName, setNewListName] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState(null);
@@ -30,11 +30,9 @@ export function ShoppingList() {
   const [observationsDialogOpen, setObservationsDialogOpen] = useState(false);
   const [finalizeDialogOpen, setFinalizeDialogOpen] = useState(false);
   const [splitDialogOpen, setSplitDialogOpen] = useState(false);
-  const [extraInfoDialogOpen, setExtraInfoDialogOpen] = useState(false);
   const [editingObservations, setEditingObservations] = useState(false);
 
   const allLists = [...lists, ...sharedLists];
-  const scannerRef = useRef(null);
   const itemsCache = useRef({});
   const listsCache = useRef({ userLists: [], sharedLists: [] });
 
@@ -138,6 +136,34 @@ export function ShoppingList() {
     }
   };
 
+  // Función para mostrar toasts
+  const showToast = (message, type = 'info') => {
+    const toastConfig = {
+      position: "top-center",
+      autoClose: 3000,
+      hideProgressBar: false,
+      closeOnClick: true,
+      pauseOnHover: true,
+      draggable: true,
+    };
+
+    switch (type) {
+      case 'success':
+        toast.success(message, toastConfig);
+        break;
+      case 'error':
+        toast.error(message, toastConfig);
+        break;
+      case 'warning':
+        toast.warning(message, toastConfig);
+        break;
+      case 'info':
+      default:
+        toast.info(message, toastConfig);
+        break;
+    }
+  };
+
   // Función mejorada para detectar categorías
   const detectCategory = (productName) => {
     if (productName.startsWith("[COMPLETADO]")) {
@@ -213,6 +239,7 @@ export function ShoppingList() {
       );
 
       setCurrentList(docRef.id);
+      showToast(`Lista "${listName}" creada exitosamente`, 'success');
       return docRef.id;
 
     } catch (err) {
@@ -234,7 +261,6 @@ export function ShoppingList() {
     try {
       const tempId = `temp-item-${Date.now()}`;
       const detectedCategory = detectCategory(itemText);
-      const categoryInfo = getCategoryInfo(detectedCategory);
 
       const newItemObj = {
         id: tempId,
@@ -244,8 +270,6 @@ export function ShoppingList() {
         addedBy: auth.currentUser.email,
         completed: false,
         category: detectedCategory,
-        categoryColor: categoryInfo.color,
-        categoryIcon: categoryInfo.icon,
         createdAt: new Date(),
         isOptimistic: true
       };
@@ -262,8 +286,6 @@ export function ShoppingList() {
           addedBy: auth.currentUser.email,
           completed: false,
           category: newItemObj.category,
-          categoryColor: newItemObj.categoryColor,
-          categoryIcon: newItemObj.categoryIcon,
           createdAt: new Date()
         });
 
@@ -275,7 +297,8 @@ export function ShoppingList() {
         ));
       }
 
-      return newItemObj.id;
+      showToast(`Producto "${itemText}" añadido`, 'success');
+      return tempId;
     } catch (err) {
       console.error("Error añadiendo producto:", err);
       // Revertir actualización optimista
@@ -284,10 +307,9 @@ export function ShoppingList() {
     }
   };
 
-  // Función toggleItemCompletion mejorada
   const toggleItemCompletion = async (itemId, currentStatus) => {
-    if (!itemId || itemId.startsWith('temp-')) {
-      console.log('ID de item no válido:', itemId);
+    if (!itemId || !auth.currentUser) {
+      console.log('ID de item no válido o usuario no autenticado:', itemId);
       return;
     }
 
@@ -298,50 +320,65 @@ export function ShoppingList() {
         return;
       }
 
-      const updates = {
-        completed: !currentStatus
-      };
+      const newCompletedStatus = !currentStatus;
+      const userEmail = auth.currentUser?.email || "";
 
-      if (!currentStatus) {
-        updates.purchasedBy = auth.currentUser?.email || "";
-        updates.purchasedAt = new Date();
-        updates.category = "COMPRADO";
-        updates.categoryColor = CATEGORIES.COMPRADO.color;
-        updates.categoryIcon = CATEGORIES.COMPRADO.icon;
-      } else {
-        updates.purchasedBy = "";
-        updates.purchasedAt = null;
-        const originalCategory = detectCategory(currentItem.text);
-        const categoryInfo = getCategoryInfo(originalCategory);
-        updates.category = originalCategory;
-        updates.categoryColor = categoryInfo.color;
-        updates.categoryIcon = categoryInfo.icon;
-      }
-
-      // Actualizar estado local
+      // Actualización optimista MEJORADA
       setItems(prev => prev.map(item =>
         item.id === itemId
           ? {
             ...item,
-            ...updates
+            completed: newCompletedStatus,
+            purchasedBy: newCompletedStatus ? userEmail : "",
+            purchasedAt: newCompletedStatus ? new Date() : null,
+            category: newCompletedStatus ? "COMPRADO" : detectCategory(currentItem.text)
           }
           : item
       ));
 
-      // Actualizar Firebase
-      if (itemId && !itemId.startsWith('temp-')) {
-        const itemRef = doc(db, "items", itemId);
-        await updateDoc(itemRef, updates);
+      // Preparar datos para Firebase - MÁS ROBUSTO
+      const updates = {
+        completed: newCompletedStatus,
+        category: newCompletedStatus ? "COMPRADO" : detectCategory(currentItem.text),
+        updatedAt: new Date()
+      };
+
+      // Solo añadir información de compra si se marca como completado
+      if (newCompletedStatus) {
+        updates.purchasedBy = userEmail;
+        updates.purchasedAt = new Date();
+      } else {
+        // Si se desmarca, limpiar la información de compra
+        updates.purchasedBy = "";
+        updates.purchasedAt = null;
       }
+
+      console.log("Actualizando item en Firebase:", itemId, updates);
+
+      const itemRef = doc(db, "items", itemId);
+
+      // Verificar que el documento existe antes de actualizar
+      const docSnap = await getDoc(itemRef);
+      if (!docSnap.exists()) {
+        throw new Error("El producto no existe en la base de datos");
+      }
+
+      await updateDoc(itemRef, updates);
+
+      const action = newCompletedStatus ? 'marcado como comprado' : 'desmarcado';
+      showToast(`Producto ${action}`, 'success');
 
     } catch (err) {
       console.error("Error actualizando item:", err);
-      // Revertir en caso de error
+
+      // Revertir cambios en caso de error
       setItems(prev => prev.map(item =>
         item.id === itemId
           ? { ...item, completed: currentStatus }
           : item
       ));
+
+      showToast("Error al actualizar el producto: " + err.message, 'error');
     }
   };
 
@@ -379,9 +416,10 @@ export function ShoppingList() {
         ...prev,
         [listId]: observations
       }));
+      showToast('Observaciones guardadas', 'success');
     } catch (error) {
       console.error("Error guardando observaciones:", error);
-      alert("Error al guardar observaciones: " + error.message);
+      showToast("Error al guardar observaciones: " + error.message, 'error');
     }
   };
 
@@ -397,7 +435,6 @@ export function ShoppingList() {
         }));
         setExtraInfo(prev => ({
           ...prev,
-          [listId]: data.extraInfo || ""
         }));
       }
     } catch (error) {
@@ -425,7 +462,7 @@ export function ShoppingList() {
           [listId]: purchaseInfoData
         }));
 
-        alert(`Precio guardado: ${totalPrice} €`);
+        showToast(`Precio guardado: ${totalPrice} €`, 'success');
       } else {
         await updateDoc(doc(db, "lists", listId), {
           purchaseInfo: null
@@ -436,11 +473,11 @@ export function ShoppingList() {
           [listId]: null
         }));
 
-        alert("Precio eliminado");
+        showToast("Precio eliminado", 'info');
       }
     } catch (error) {
       console.error("Error finalizando compra:", error);
-      alert("Error al guardar precio: " + error.message);
+      showToast("Error al guardar precio: " + error.message, 'error');
     }
   };
 
@@ -454,29 +491,8 @@ Número de personas: ${participants.length}\n
 Precio por persona: ${sharePerPerson.toFixed(2)} €\n\n
 ${participants.map((p, i) => `${i + 1}. ${p}: ${sharePerPerson.toFixed(2)} €`).join('\n')}`;
 
-    if (window.confirm(result + "\n\n¿Quieres copiar al portapapeles?")) {
-      navigator.clipboard.writeText(result);
-      alert("Copiado al portapapeles");
-    }
-  };
-
-  // Guardar información adicional
-  const saveExtraInfo = async (listId, info) => {
-    try {
-      await updateDoc(doc(db, "lists", listId), {
-        extraInfo: info
-      });
-
-      setExtraInfo(prev => ({
-        ...prev,
-        [listId]: info
-      }));
-
-      alert("Información guardada");
-    } catch (error) {
-      console.error("Error guardando información adicional:", error);
-      alert("Error al guardar información: " + error.message);
-    }
+    navigator.clipboard.writeText(result);
+    showToast("Resumen copiado al portapapeles", 'success');
   };
 
   // Cargar precios de items
@@ -534,10 +550,11 @@ ${participants.map((p, i) => `${i + 1}. ${p}: ${sharePerPerson.toFixed(2)} €`)
         }));
 
         updateTotalPrice(listId);
+        showToast(`Precio guardado: ${price}€`, 'success');
       }
     } catch (error) {
       console.error("Error guardando precio de item:", error);
-      alert("Error al guardar precio: " + error.message);
+      showToast("Error al guardar precio: " + error.message, 'error');
     }
   };
 
@@ -637,6 +654,7 @@ ${participants.map((p, i) => `${i + 1}. ${p}: ${sharePerPerson.toFixed(2)} €`)
     } catch (err) {
       console.error("Error loading initial data:", err);
       setError(`Error loading data: ${err.message}`);
+      showToast(`Error cargando datos: ${err.message}`, 'error');
     } finally {
       setLoading(false);
     }
@@ -677,36 +695,64 @@ ${participants.map((p, i) => `${i + 1}. ${p}: ${sharePerPerson.toFixed(2)} €`)
     return unsubscribe;
   };
 
-  // Efecto para items - CORREGIDO
+  // Efecto para items - CORREGIDO Y MEJORADO
   useEffect(() => {
     if (!currentList) {
       setItems([]);
       return;
     }
 
+    console.log("Suscribiéndose a items para lista:", currentList);
+
     const q = query(
       collection(db, "items"),
       where("listId", "==", currentList)
     );
 
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const updatedItems = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data(),
-        isOptimistic: false
-      }));
+    const unsubscribe = onSnapshot(q,
+      (snapshot) => {
+        console.log("Nuevos datos recibidos:", snapshot.docs.length, "items");
 
-      // Combinar items de Firebase con items optimistas locales
-      const optimisticItems = items.filter(item => item.isOptimistic && item.listId === currentList);
-      const combinedItems = [...optimisticItems, ...updatedItems];
+        const updatedItems = snapshot.docs.map(doc => {
+          const data = doc.data();
+          console.log("Procesando item:", doc.id, data);
 
-      itemsCache.current = {
-        ...itemsCache.current,
-        [currentList]: combinedItems
-      };
+          // Asegurar que todos los campos necesarios existen
+          const categoryInfo = getCategoryInfo(data.category || "OTHER");
 
-      setItems(combinedItems);
-    });
+          return {
+            id: doc.id,
+            text: data.text || "",
+            listId: data.listId || currentList,
+            userId: data.userId || "",
+            addedBy: data.addedBy || "",
+            completed: data.completed || false,
+            purchasedBy: data.purchasedBy || "",
+            purchasedAt: data.purchasedAt || null,
+            category: data.category || "OTHER",
+            createdAt: data.createdAt || new Date(),
+            categoryColor: categoryInfo.color,
+            categoryIcon: categoryInfo.icon,
+            isOptimistic: false
+          };
+        });
+
+        // Combinar con items optimistas
+        const optimisticItems = items.filter(item =>
+          item.isOptimistic && item.listId === currentList
+        );
+        const combinedItems = [...optimisticItems, ...updatedItems];
+
+        console.log("Items combinados:", combinedItems.length);
+
+        setItems(combinedItems);
+      },
+      (error) => {
+        console.error("Error en listener de items:", error);
+        setError(`Error al cargar productos: ${error.message}`);
+        showToast(`Error al cargar productos: ${error.message}`, 'error');
+      }
+    );
 
     return unsubscribe;
   }, [currentList]);
@@ -721,6 +767,7 @@ ${participants.map((p, i) => `${i + 1}. ${p}: ${sharePerPerson.toFixed(2)} €`)
     } catch (err) {
       console.error("Error creando lista:", err);
       setError(`Error al crear lista: ${err.message}`);
+      showToast(`Error al crear lista: ${err.message}`, 'error');
     }
   };
 
@@ -734,14 +781,7 @@ ${participants.map((p, i) => `${i + 1}. ${p}: ${sharePerPerson.toFixed(2)} €`)
     } catch (err) {
       console.error("Error añadiendo producto:", err);
       setError(`Error al añadir producto: ${err.message}`);
-    }
-  };
-
-  // Handler para Enter key - CORREGIDO
-  const handleKeyPress = (e, type, value, setValue, handler) => {
-    if (e.key === 'Enter' && value.trim()) {
-      handler(value);
-      setValue(""); // Limpiar input después de enviar
+      showToast(`Error al añadir producto: ${err.message}`, 'error');
     }
   };
 
@@ -749,21 +789,76 @@ ${participants.map((p, i) => `${i + 1}. ${p}: ${sharePerPerson.toFixed(2)} €`)
     try {
       setLoading(true);
 
-      if (id && !id.startsWith('temp-')) {
-        await deleteDoc(doc(db, "items", id));
-
-        try {
-          await deleteDoc(doc(db, "itemPrices", id));
-        } catch (priceError) {
-          console.log("No se encontró precio para eliminar:", priceError);
-        }
+      if (!currentList || !auth.currentUser) {
+        throw new Error("No se puede eliminar el producto en este momento");
       }
 
+      const itemToDelete = items.find(item => item.id === id);
+      if (!itemToDelete) {
+        throw new Error("Producto no encontrado");
+      }
+
+      console.log("Eliminando item:", id, "de la lista:", currentList);
+
+      // Actualización optimista - eliminar inmediatamente del estado local
       setItems(prev => prev.filter(item => item.id !== id));
       setConfirmDelete(null);
+
+      // Solo eliminar de Firebase si no es un item temporal
+      if (id && !id.startsWith('temp-')) {
+        try {
+          // Verificar que el documento existe antes de eliminar
+          const itemRef = doc(db, "items", id);
+          const docSnap = await getDoc(itemRef);
+
+          if (docSnap.exists()) {
+            console.log("Eliminando item de Firebase:", id);
+            await deleteDoc(itemRef);
+            console.log("Item eliminado exitosamente de Firebase");
+
+            // Intentar eliminar el precio asociado si existe
+            try {
+              const priceRef = doc(db, "itemPrices", id);
+              const priceSnap = await getDoc(priceRef);
+              if (priceSnap.exists()) {
+                await deleteDoc(priceRef);
+                console.log("Precio eliminado exitosamente");
+
+                // Actualizar el estado local de precios
+                setItemPrices(prev => {
+                  const updatedPrices = { ...prev };
+                  if (updatedPrices[currentList]) {
+                    delete updatedPrices[currentList][id];
+                  }
+                  return updatedPrices;
+                });
+              }
+            } catch (priceError) {
+              console.log("No se encontró precio para eliminar o error al eliminar:", priceError);
+            }
+          } else {
+            console.log("El item ya no existe en Firebase, solo se eliminó localmente");
+          }
+        } catch (firestoreError) {
+          console.error("Error al eliminar de Firebase:", firestoreError);
+          throw new Error(`Error al eliminar de la base de datos: ${firestoreError.message}`);
+        }
+      } else {
+        console.log("Eliminando item temporal, solo actualización local");
+      }
+
+      showToast('Producto eliminado', 'success');
+
     } catch (err) {
       console.error("Error borrando producto:", err);
-      alert("No tienes permiso para borrar este producto");
+
+      // Revertir en caso de error - buscar el item original
+      const originalItem = confirmDelete || items.find(item => item.id === id);
+      if (originalItem) {
+        setItems(prev => [...prev, originalItem]);
+      }
+
+      showToast("Error al eliminar producto: " + err.message, 'error');
     } finally {
       setLoading(false);
     }
@@ -780,6 +875,7 @@ ${participants.map((p, i) => `${i + 1}. ${p}: ${sharePerPerson.toFixed(2)} €`)
 
       const batch = writeBatch(db);
 
+      // Eliminar items
       const itemsQuery = query(collection(db, "items"), where("listId", "==", listId));
       const itemsSnapshot = await getDocs(itemsQuery);
 
@@ -788,18 +884,39 @@ ${participants.map((p, i) => `${i + 1}. ${p}: ${sharePerPerson.toFixed(2)} €`)
         batch.delete(doc(db, "itemPrices", itemDoc.id));
       });
 
+      // ELIMINAR OBSERVACIONES DE LA LISTA - NUEVO
       batch.delete(doc(db, "listObservations", listId));
+
+      // Eliminar la lista
       batch.delete(doc(db, "lists", listId));
+
       await batch.commit();
+
+      // Limpiar el estado local de observaciones
+      setListObservations(prev => {
+        const newObservations = { ...prev };
+        delete newObservations[listId];
+        return newObservations;
+      });
 
       setConfirmListDelete(null);
 
       if (currentList === listId) {
         setCurrentList("");
       }
+
+      // Mostrar mensaje de éxito
+      showToast("Lista eliminada exitosamente", 'success');
+
     } catch (err) {
       console.error("Error eliminando lista:", err);
       setError(`Error al eliminar: ${err.message}`);
+      showToast(`Error al eliminar: ${err.message}`, 'error');
+
+      // Revertir cambios locales en caso de error
+      if (currentList === listId) {
+        setCurrentList(listId);
+      }
     }
   };
 
@@ -844,10 +961,12 @@ ${participants.map((p, i) => `${i + 1}. ${p}: ${sharePerPerson.toFixed(2)} €`)
 
       setUnshareDialogOpen(false);
       setUserToUnshare("");
+      showToast(`Lista dejada de compartir con ${userToUnshare}`, 'success');
     } catch (err) {
       console.error("Error eliminando compartido:", err);
       setSharedUsers([...sharedUsers, userToUnshare]);
       setError(`Error al eliminar compartido: ${err.message}`);
+      showToast(`Error al eliminar compartido: ${err.message}`, 'error');
     }
   };
 
@@ -862,12 +981,19 @@ ${participants.map((p, i) => `${i + 1}. ${p}: ${sharePerPerson.toFixed(2)} €`)
     return list.name;
   };
 
+  // Verificar si el usuario actual es el propietario de la lista actual
+  const isCurrentListOwned = () => {
+    return lists.some(list => list.id === currentList);
+  };
+
+  // Verificar si la lista actual es compartida con el usuario
   const isCurrentListShared = () => {
     return sharedLists.some(list => list.id === currentList);
   };
 
-  const isCurrentListOwned = () => {
-    return lists.some(list => list.id === currentList);
+  // Verificar si el usuario actual tiene acceso a la lista (propietario o compartida)
+  const userHasAccessToList = (listId) => {
+    return allLists.some(list => list.id === listId);
   };
 
   const isListSharedByMe = (list) => {
@@ -959,6 +1085,7 @@ ${participants.map((p, i) => `${i + 1}. ${p}: ${sharePerPerson.toFixed(2)} €`)
 
       setEmailToShare("");
       setEmailValidation({ valid: true, message: "¡Lista compartida exitosamente!" });
+      showToast(`Lista compartida con ${emailToShare}`, 'success');
 
       setTimeout(() => {
         setEmailValidation({ valid: true, message: "" });
@@ -972,6 +1099,7 @@ ${participants.map((p, i) => `${i + 1}. ${p}: ${sharePerPerson.toFixed(2)} €`)
         valid: false,
         message: `Error al compartir: ${err.message}`
       });
+      showToast(`Error al compartir: ${err.message}`, 'error');
     } finally {
       setLoading(false);
     }
@@ -982,7 +1110,6 @@ ${participants.map((p, i) => `${i + 1}. ${p}: ${sharePerPerson.toFixed(2)} €`)
     if (!currentList) return null;
 
     const currentPurchaseInfo = purchaseInfo[currentList];
-    const currentExtraInfo = extraInfo[currentList];
     const currentObservations = listObservations[currentList] || "";
     const currentListData = allLists.find(list => list.id === currentList);
     const currentItemPrices = itemPrices[currentList] || {};
@@ -1037,20 +1164,6 @@ ${participants.map((p, i) => `${i + 1}. ${p}: ${sharePerPerson.toFixed(2)} €`)
             >
               👥
             </button>
-            <button
-              onClick={() => setExtraInfoDialogOpen(true)}
-              className="action-btn"
-              title="Información Adicional"
-              style={{
-                padding: "8px",
-                borderRadius: "8px",
-                border: "1px solid #e2e8f0",
-                background: "white",
-                cursor: "pointer"
-              }}
-            >
-              ℹ️
-            </button>
           </div>
         </div>
 
@@ -1090,7 +1203,12 @@ ${participants.map((p, i) => `${i + 1}. ${p}: ${sharePerPerson.toFixed(2)} €`)
     const isSharedList = isCurrentListShared();
     const currentUserEmail = auth.currentUser?.email;
     const itemPrice = itemPrices[currentList]?.[item.id]?.amount;
-    const categoryInfo = getCategoryInfo(item.category);
+
+    // Calcular categoryInfo dinámicamente basado en la categoría del item
+    const categoryInfo = getCategoryInfo(item.category || "OTHER");
+
+    // Verificar si el usuario actual tiene acceso a la lista
+    const userHasAccess = currentList && allLists.some(list => list.id === currentList);
 
     return (
       <li className="elegant-item" style={{
@@ -1132,33 +1250,51 @@ ${participants.map((p, i) => `${i + 1}. ${p}: ${sharePerPerson.toFixed(2)} €`)
               width: '20px',
               height: '20px',
               accentColor: '#10B981',
-              cursor: 'pointer'
+              cursor: loading ? 'not-allowed' : 'pointer'
             }}
             disabled={loading}
           />
 
-          <span
-            className="item-text"
-            style={{
-              fontSize: '16px',
-              fontWeight: '500',
-              color: item.completed ? '#9CA3AF' : '#374151',
-              textDecoration: item.completed ? 'line-through' : 'none',
-              flex: 1
-            }}
-          >
-            {item.text}
-            {item.isOptimistic && (
-              <span style={{
-                fontSize: '12px',
-                color: '#6B7280',
-                marginLeft: '8px',
-                fontStyle: 'italic'
-              }}>
-                (guardando...)
+          <div className="item-text-container" style={{ flex: 1 }}>
+            <span
+              className="item-text"
+              style={{
+                fontSize: '16px',
+                fontWeight: '500',
+                color: item.completed ? '#9CA3AF' : '#374151',
+                textDecoration: item.completed ? 'line-through' : 'none',
+                display: 'block'
+              }}
+            >
+              {item.text}
+              {item.isOptimistic && (
+                <span style={{
+                  fontSize: '12px',
+                  color: '#6B7280',
+                  marginLeft: '8px',
+                  fontStyle: 'italic'
+                }}>
+                  (guardando...)
+                </span>
+              )}
+            </span>
+
+            {/* INFORMACIÓN DE QUIÉN AÑADIÓ Y QUIÉN COMPRÓ */}
+            <div className="item-metadata" style={{
+              fontSize: '12px',
+              color: '#6B7280',
+              marginTop: '4px'
+            }}>
+              <span className="added-by-info">
+                Añadido por: {item.addedBy?.split('@')[0] || 'Usuario'}
               </span>
-            )}
-          </span>
+              {item.completed && item.purchasedBy && (
+                <span className="purchaser-info" style={{ marginLeft: '12px' }}>
+                  • Comprado por: {item.purchasedBy?.split('@')[0] || 'Usuario'}
+                </span>
+              )}
+            </div>
+          </div>
         </div>
 
         <div className="item-actions" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -1175,43 +1311,43 @@ ${participants.map((p, i) => `${i + 1}. ${p}: ${sharePerPerson.toFixed(2)} €`)
             </span>
           )}
 
-          <button
-            onClick={() => setConfirmDelete(item)}
-            disabled={loading || item.isOptimistic}
-            className="elegant-delete-btn"
-            style={{
-              padding: '6px',
-              borderRadius: '8px',
-              border: 'none',
-              backgroundColor: 'transparent',
-              cursor: item.isOptimistic ? 'not-allowed' : 'pointer',
-              transition: 'background-color 0.2s',
-              opacity: loading || item.isOptimistic ? 0.5 : 1
-            }}
-            onMouseEnter={(e) => {
-              if (!item.isOptimistic) e.target.style.backgroundColor = '#FEF2F2';
-            }}
-            onMouseLeave={(e) => {
-              if (!item.isOptimistic) e.target.style.backgroundColor = 'transparent';
-            }}
-          >
-            <svg
-              width="18"
-              height="18"
-              viewBox="0 0 24 24"
-              fill="none"
-              xmlns="http://www.w3.org/2000/svg"
-              style={{ color: '#EF4444' }}
+          {/* PERMITIR ELIMINAR ITEMS A TODOS LOS USUARIOS CON ACCESO A LA LISTA */}
+          {currentList && ( // Solo mostrar si hay una lista seleccionada
+            <button
+              onClick={() => setConfirmDelete(item)}
+              disabled={loading || item.isOptimistic}
+              className="elegant-delete-btn"
+              style={{
+                background: 'none',
+                border: 'none',
+                cursor: loading || item.isOptimistic ? 'not-allowed' : 'pointer',
+                padding: '4px',
+                borderRadius: '4px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                opacity: loading || item.isOptimistic ? 0.5 : 1
+              }}
+              title="Eliminar producto"
             >
-              <path
-                d="M19 7L18.1327 19.1425C18.0579 20.1891 17.187 21 16.1378 21H7.86224C6.81296 21 5.94208 20.1891 5.86732 19.1425L5 7M10 11V17M14 11V17M15 7V4C15 3.44772 14.5523 3 14 3H10C9.44772 3 9 3.44772 9 4V7M4 7H20"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </svg>
-          </button>
+              <svg
+                width="18"
+                height="18"
+                viewBox="0 0 24 24"
+                fill="none"
+                xmlns="http://www.w3.org/2000/svg"
+                style={{ color: '#EF4444' }}
+              >
+                <path
+                  d="M19 7L18.1327 19.1425C18.0579 20.1891 17.187 21 16.1378 21H7.86224C6.81296 21 5.94208 20.1891 5.86732 19.1425L5 7M10 11V17M14 11V17M15 7V4C15 3.44772 14.5523 3 14 3H10C9.44772 3 9 3.44772 9 4V7M4 7H20"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            </button>
+          )}
         </div>
       </li>
     );
@@ -1223,7 +1359,7 @@ ${participants.map((p, i) => `${i + 1}. ${p}: ${sharePerPerson.toFixed(2)} €`)
 
     const handleCreate = async () => {
       if (!localListName.trim()) return;
-      
+
       try {
         await handleCreateList(localListName);
         setLocalListName(""); // Limpiar solo si fue exitoso
@@ -1242,12 +1378,15 @@ ${participants.map((p, i) => `${i + 1}. ${p}: ${sharePerPerson.toFixed(2)} €`)
     return (
       <div className="elegant-list-creator" style={{
         display: 'flex',
+        flexDirection: 'row',
         gap: '12px',
         marginBottom: '24px',
         padding: '16px',
         backgroundColor: '#F8FAFC',
         borderRadius: '12px',
-        border: '1px solid #E2E8F0'
+        border: '1px solid #E2E8F0',
+        alignItems: 'stretch',
+        flexWrap: 'wrap'
       }}>
         <input
           value={localListName}
@@ -1256,7 +1395,8 @@ ${participants.map((p, i) => `${i + 1}. ${p}: ${sharePerPerson.toFixed(2)} €`)
           placeholder="Nombre de nueva lista..."
           className="elegant-input"
           style={{
-            flex: 1,
+            flex: '1 1 200px',
+            minWidth: '0',
             padding: '12px 16px',
             border: '1px solid #D1D5DB',
             borderRadius: '8px',
@@ -1264,7 +1404,8 @@ ${participants.map((p, i) => `${i + 1}. ${p}: ${sharePerPerson.toFixed(2)} €`)
             color: '#1F2937',
             backgroundColor: 'white',
             outline: 'none',
-            transition: 'all 0.2s'
+            transition: 'all 0.2s',
+            boxSizing: 'border-box'
           }}
           onFocus={(e) => e.target.style.borderColor = '#3B82F6'}
           onBlur={(e) => e.target.style.borderColor = '#D1D5DB'}
@@ -1274,6 +1415,7 @@ ${participants.map((p, i) => `${i + 1}. ${p}: ${sharePerPerson.toFixed(2)} €`)
           disabled={loading || !localListName.trim()}
           className="elegant-create-btn"
           style={{
+            flex: '0 0 auto',
             padding: '12px 20px',
             border: 'none',
             borderRadius: '8px',
@@ -1285,7 +1427,10 @@ ${participants.map((p, i) => `${i + 1}. ${p}: ${sharePerPerson.toFixed(2)} €`)
             transition: 'all 0.2s',
             display: 'flex',
             alignItems: 'center',
-            gap: '8px'
+            justifyContent: 'center',
+            gap: '8px',
+            minWidth: '140px',
+            boxSizing: 'border-box'
           }}
           onMouseEnter={(e) => {
             if (localListName.trim()) {
@@ -1301,19 +1446,113 @@ ${participants.map((p, i) => `${i + 1}. ${p}: ${sharePerPerson.toFixed(2)} €`)
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
             <path d="M12 4V20M4 12H20" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
-          Crear Lista
+          <span className="button-text">Crear Lista</span>
         </button>
+
+        <style jsx>{`
+        @media (max-width: 640px) {
+          .elegant-list-creator {
+            flex-direction: column;
+            gap: 12px;
+            padding: 12px;
+          }
+          
+          .elegant-input {
+            flex: 1 1 auto;
+            min-width: 100%;
+            font-size: 16px; /* Previene zoom en iOS */
+          }
+          
+          .elegant-create-btn {
+            flex: 0 0 auto;
+            width: 100%;
+            min-width: auto;
+            padding: 14px 16px;
+          }
+          
+          .button-text {
+            display: block;
+          }
+        }
+        
+        @media (max-width: 480px) {
+          .elegant-list-creator {
+            margin-bottom: 16px;
+            padding: 12px;
+          }
+          
+          .elegant-input {
+            padding: 14px 12px;
+            font-size: 16px;
+          }
+          
+          .elegant-create-btn {
+            padding: 14px 12px;
+            font-size: 16px;
+          }
+        }
+        
+        @media (max-width: 380px) {
+          .elegant-list-creator {
+            gap: 10px;
+            padding: 10px;
+          }
+          
+          .elegant-input {
+            padding: 12px;
+            font-size: 16px;
+          }
+          
+          .elegant-create-btn {
+            padding: 12px;
+            font-size: 15px;
+          }
+          
+          .elegant-create-btn svg {
+            width: 18px;
+            height: 18px;
+          }
+        }
+        
+        /* Para tablets en modo vertical */
+        @media (min-width: 641px) and (max-width: 768px) {
+          .elegant-list-creator {
+            gap: 10px;
+          }
+          
+          .elegant-input {
+            flex: 1 1 150px;
+          }
+          
+          .elegant-create-btn {
+            min-width: 130px;
+            padding: 12px 16px;
+          }
+        }
+        
+        /* Mejora la experiencia táctil en dispositivos móviles */
+        @media (hover: none) {
+          .elegant-create-btn:hover {
+            background-color: inherit;
+          }
+          
+          .elegant-create-btn:active {
+            background-color: #2563EB;
+            transform: scale(0.98);
+          }
+        }
+      `}</style>
       </div>
     );
   };
 
-  // Componente elegante para añadir items - CORREGIDO
+  // Componente elegante para añadir items - COMPLETAMENTE RESPONSIVE
   const ElegantItemAdder = () => {
     const [localItem, setLocalItem] = useState("");
 
     const handleAdd = async () => {
       if (!localItem.trim()) return;
-      
+
       try {
         await handleAddItem(localItem);
         setLocalItem(""); // Limpiar solo si fue exitoso
@@ -1332,8 +1571,11 @@ ${participants.map((p, i) => `${i + 1}. ${p}: ${sharePerPerson.toFixed(2)} €`)
     return (
       <div className="elegant-item-adder" style={{
         display: 'flex',
+        flexDirection: 'row',
         gap: '12px',
-        marginBottom: '20px'
+        marginBottom: '20px',
+        alignItems: 'stretch',
+        flexWrap: 'wrap'
       }}>
         <input
           value={localItem}
@@ -1342,7 +1584,8 @@ ${participants.map((p, i) => `${i + 1}. ${p}: ${sharePerPerson.toFixed(2)} €`)
           placeholder="Añadir nuevo producto..."
           className="elegant-input"
           style={{
-            flex: 1,
+            flex: '1 1 200px',
+            minWidth: '0',
             padding: '12px 16px',
             border: '1px solid #D1D5DB',
             borderRadius: '8px',
@@ -1350,7 +1593,8 @@ ${participants.map((p, i) => `${i + 1}. ${p}: ${sharePerPerson.toFixed(2)} €`)
             color: '#1F2937',
             backgroundColor: 'white',
             outline: 'none',
-            transition: 'all 0.2s'
+            transition: 'all 0.2s',
+            boxSizing: 'border-box'
           }}
           onFocus={(e) => e.target.style.borderColor = '#3B82F6'}
           onBlur={(e) => e.target.style.borderColor = '#D1D5DB'}
@@ -1360,7 +1604,8 @@ ${participants.map((p, i) => `${i + 1}. ${p}: ${sharePerPerson.toFixed(2)} €`)
           disabled={!localItem.trim()}
           className="elegant-add-btn"
           style={{
-            padding: '12px 16px',
+            flex: '0 0 auto',
+            padding: '12px 20px',
             border: 'none',
             borderRadius: '8px',
             backgroundColor: !localItem.trim() ? '#9CA3AF' : '#10B981',
@@ -1371,7 +1616,10 @@ ${participants.map((p, i) => `${i + 1}. ${p}: ${sharePerPerson.toFixed(2)} €`)
             transition: 'all 0.2s',
             display: 'flex',
             alignItems: 'center',
-            gap: '8px'
+            justifyContent: 'center',
+            gap: '8px',
+            minWidth: '120px',
+            boxSizing: 'border-box'
           }}
           onMouseEnter={(e) => {
             if (localItem.trim()) {
@@ -1387,8 +1635,130 @@ ${participants.map((p, i) => `${i + 1}. ${p}: ${sharePerPerson.toFixed(2)} €`)
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
             <path d="M12 4V20M4 12H20" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
-          Añadir
+          <span className="button-text">Añadir</span>
         </button>
+
+        <style jsx>{`
+        @media (max-width: 640px) {
+          .elegant-item-adder {
+            flex-direction: column;
+            gap: 12px;
+            margin-bottom: 16px;
+          }
+          
+          .elegant-input {
+            flex: 1 1 auto;
+            min-width: 100%;
+            font-size: 16px; /* Previene zoom en iOS */
+            padding: 14px 16px;
+          }
+          
+          .elegant-add-btn {
+            flex: 0 0 auto;
+            width: 100%;
+            min-width: auto;
+            padding: 14px 16px;
+          }
+          
+          .button-text {
+            display: block;
+          }
+        }
+        
+        @media (max-width: 480px) {
+          .elegant-item-adder {
+            margin-bottom: 16px;
+          }
+          
+          .elegant-input {
+            padding: 14px 12px;
+            font-size: 16px;
+          }
+          
+          .elegant-add-btn {
+            padding: 14px 12px;
+            font-size: 16px;
+          }
+        }
+        
+        @media (max-width: 380px) {
+          .elegant-item-adder {
+            gap: 10px;
+          }
+          
+          .elegant-input {
+            padding: 12px;
+            font-size: 16px;
+          }
+          
+          .elegant-add-btn {
+            padding: 12px;
+            font-size: 15px;
+          }
+          
+          .elegant-add-btn svg {
+            width: 18px;
+            height: 18px;
+          }
+        }
+        
+        /* Para tablets en modo vertical */
+        @media (min-width: 641px) and (max-width: 768px) {
+          .elegant-item-adder {
+            gap: 10px;
+          }
+          
+          .elegant-input {
+            flex: 1 1 150px;
+          }
+          
+          .elegant-add-btn {
+            min-width: 110px;
+            padding: 12px 16px;
+          }
+        }
+        
+        /* Para pantallas muy grandes */
+        @media (min-width: 1200px) {
+          .elegant-item-adder {
+            gap: 16px;
+          }
+          
+          .elegant-input {
+            flex: 1 1 300px;
+          }
+        }
+        
+        /* Mejora la experiencia táctil en dispositivos móviles */
+        @media (hover: none) {
+          .elegant-add-btn:hover {
+            background-color: inherit;
+          }
+          
+          .elegant-add-btn:active {
+            background-color: #059669;
+            transform: scale(0.98);
+          }
+        }
+        
+        /* Mejoras de accesibilidad */
+        .elegant-input:focus {
+          border-color: #3B82F6;
+          box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+        }
+        
+        .elegant-add-btn:focus {
+          outline: 2px solid #3B82F6;
+          outline-offset: 2px;
+        }
+        
+        /* Estados de loading mejorados */
+        .elegant-add-btn:disabled {
+          opacity: 0.6;
+          cursor: not-allowed;
+          transform: none;
+        }
+      `}</style>
       </div>
     );
   };
@@ -1453,6 +1823,21 @@ ${participants.map((p, i) => `${i + 1}. ${p}: ${sharePerPerson.toFixed(2)} €`)
       minHeight: '100vh',
       backgroundColor: '#F3F4F6'
     }}>
+
+      <ToastContainer
+        style={{
+          position: 'fixed',
+          top: '20px',
+          left: '50%',
+          transform: 'translateX(-50%)',
+          zIndex: 2000,
+          maxWidth: '90%'
+        }}
+        closeButton={false}
+        autoClose={2000}
+        hideProgressBar={true}
+      />
+
       <nav className="elegant-navbar" style={{
         backgroundColor: 'white',
         boxShadow: '0 2px 10px rgba(0,0,0,0.1)',
@@ -1465,7 +1850,9 @@ ${participants.map((p, i) => `${i + 1}. ${p}: ${sharePerPerson.toFixed(2)} €`)
           padding: '0 20px',
           display: 'flex',
           alignItems: 'center',
-          justifyContent: 'space-between'
+          justifyContent: 'space-between',
+          flexWrap: 'wrap',
+          gap: '16px'
         }}>
           <div className="logo-container" style={{
             display: 'flex',
@@ -1506,7 +1893,8 @@ ${participants.map((p, i) => `${i + 1}. ${p}: ${sharePerPerson.toFixed(2)} €`)
                 display: 'flex',
                 alignItems: 'center',
                 gap: '8px',
-                transition: 'all 0.2s'
+                transition: 'all 0.2s',
+                fontSize: '14px'
               }}
               onMouseEnter={(e) => {
                 e.target.style.backgroundColor = '#F3F4F6';
@@ -1550,7 +1938,9 @@ ${participants.map((p, i) => `${i + 1}. ${p}: ${sharePerPerson.toFixed(2)} €`)
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'space-between',
-                marginBottom: '16px'
+                marginBottom: '16px',
+                flexWrap: 'wrap',
+                gap: '12px'
               }}>
                 <h3 style={{
                   fontSize: '20px',
@@ -1561,7 +1951,7 @@ ${participants.map((p, i) => `${i + 1}. ${p}: ${sharePerPerson.toFixed(2)} €`)
                   Seleccionar Lista
                 </h3>
 
-                <div className="list-actions" style={{ display: 'flex', gap: '8px' }}>
+                <div className="list-actions" style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
                   <button
                     onClick={openShareDialog}
                     disabled={!currentList || loading || isCurrentListShared()}
@@ -1599,6 +1989,57 @@ ${participants.map((p, i) => `${i + 1}. ${p}: ${sharePerPerson.toFixed(2)} €`)
                       />
                     </svg>
                     Compartir
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      const currentListData = allLists.find(list => list.id === currentList);
+                      if (currentListData && isCurrentListOwned()) {
+                        setConfirmListDelete(currentListData);
+                      }
+                    }}
+                    disabled={!currentList || loading || !isCurrentListOwned()}
+                    className="elegant-action-btn"
+                    title={!isCurrentListOwned() ? "Solo el propietario puede eliminar la lista" : "Eliminar lista"}
+                    style={{
+                      padding: '8px 12px',
+                      border: '1px solid #E5E7EB',
+                      borderRadius: '8px',
+                      backgroundColor: 'white',
+                      cursor: !isCurrentListOwned() ? 'not-allowed' : 'pointer',
+                      opacity: !isCurrentListOwned() ? 0.5 : 1,
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      fontSize: '14px',
+                      fontWeight: '500',
+                      transition: 'all 0.2s',
+                      color: !isCurrentListOwned() ? '#9CA3AF' : '#EF4444',
+                      borderColor: !isCurrentListOwned() ? '#E5E7EB' : '#FECACA'
+                    }}
+                    onMouseEnter={(e) => {
+                      if (isCurrentListOwned()) {
+                        e.target.style.backgroundColor = '#FEF2F2';
+                        e.target.style.borderColor = '#FECACA';
+                      }
+                    }}
+                    onMouseLeave={(e) => {
+                      if (isCurrentListOwned()) {
+                        e.target.style.backgroundColor = 'white';
+                        e.target.style.borderColor = '#E5E7EB';
+                      }
+                    }}
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                      <path
+                        d="M19 7L18.1327 19.1425C18.0579 20.1891 17.187 21 16.1378 21H7.86224C6.81296 21 5.94208 20.1891 5.86732 19.1425L5 7M10 11V17M14 11V17M15 7V4C15 3.44772 14.5523 3 14 3H10C9.44772 3 9 3.44772 9 4V7M4 7H20"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    </svg>
+                    Eliminar
                   </button>
                 </div>
               </div>
@@ -1725,7 +2166,9 @@ ${participants.map((p, i) => `${i + 1}. ${p}: ${sharePerPerson.toFixed(2)} €`)
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'space-between',
-                marginBottom: '20px'
+                marginBottom: '20px',
+                flexWrap: 'wrap',
+                gap: '12px'
               }}>
                 <h3 style={{
                   fontSize: '20px',
@@ -1768,26 +2211,45 @@ ${participants.map((p, i) => `${i + 1}. ${p}: ${sharePerPerson.toFixed(2)} €`)
                           backgroundColor: `${categoryInfo.color}15`,
                           borderLeft: `4px solid ${categoryInfo.color}`,
                           borderRadius: '8px',
-                          margin: '16px 0 8px 0'
+                          margin: '16px 0 8px 0',
+                          flexWrap: 'wrap'
                         }}>
-                          <span style={{ fontSize: '18px' }}>{categoryInfo.icon}</span>
+                          <span style={{
+                            fontSize: '18px',
+                            flexShrink: 0
+                          }}>
+                            {categoryInfo.icon}
+                          </span>
                           <h4 style={{
                             fontSize: '16px',
                             fontWeight: '600',
                             color: categoryInfo.color,
-                            margin: 0
+                            margin: 0,
+                            flex: '1 1 auto',
+                            minWidth: '120px'
                           }}>
                             {categoryInfo.name}
                           </h4>
                           <span style={{
                             fontSize: '14px',
                             color: '#6B7280',
-                            marginLeft: 'auto'
+                            flexShrink: 0,
+                            backgroundColor: 'rgba(255, 255, 255, 0.7)',
+                            padding: '4px 8px',
+                            borderRadius: '12px',
+                            fontWeight: '500'
                           }}>
-                            {groupedPendingItems[category].length} items
+                            {groupedPendingItems[category].length} {groupedPendingItems[category].length === 1 ? 'item' : 'items'}
                           </span>
                         </div>
-                        <ul className="elegant-items-list" style={{ listStyle: 'none', padding: 0, margin: 0 }}>
+                        <ul className="elegant-items-list" style={{
+                          listStyle: 'none',
+                          padding: 0,
+                          margin: 0,
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: '8px'
+                        }}>
                           {groupedPendingItems[category].map(item => (
                             <ElegantItem key={item.id} item={item} />
                           ))}
@@ -1807,26 +2269,33 @@ ${participants.map((p, i) => `${i + 1}. ${p}: ${sharePerPerson.toFixed(2)} €`)
                         backgroundColor: '#10B98115',
                         borderLeft: '4px solid #10B981',
                         borderRadius: '8px',
-                        margin: '24px 0 8px 0'
+                        margin: '24px 0 8px 0',
+                        flexWrap: 'wrap'
                       }}>
-                        <span style={{ fontSize: '18px' }}>✅</span>
+                        <span style={{
+                          fontSize: '18px',
+                          flexShrink: 0
+                        }}>
+                        </span>
                         <h4 style={{
                           fontSize: '16px',
                           fontWeight: '600',
                           color: '#10B981',
-                          margin: 0
+                          margin: 0,
+                          flex: '1 1 auto',
+                          minWidth: '120px'
                         }}>
                           Comprado
                         </h4>
-                        <span style={{
-                          fontSize: '14px',
-                          color: '#6B7280',
-                          marginLeft: 'auto'
-                        }}>
-                          {completedItems.length} items
-                        </span>
                       </div>
-                      <ul className="elegant-items-list" style={{ listStyle: 'none', padding: 0, margin: 0 }}>
+                      <ul className="elegant-items-list" style={{
+                        listStyle: 'none',
+                        padding: 0,
+                        margin: 0,
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '8px'
+                      }}>
                         {completedItems.map(item => (
                           <ElegantItem key={item.id} item={item} />
                         ))}
@@ -1838,13 +2307,48 @@ ${participants.map((p, i) => `${i + 1}. ${p}: ${sharePerPerson.toFixed(2)} €`)
                 <div className="elegant-empty-items" style={{
                   textAlign: 'center',
                   padding: '40px 20px',
-                  color: '#6B7280'
+                  color: '#6B7280',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  minHeight: '200px'
                 }}>
-                  <svg width="64" height="64" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ marginBottom: '16px', opacity: 0.5 }}>
-                    <path d="M3 10H21M7 3V5M17 3V5M6.2 21H17.8C18.9201 21 19.4802 21 19.908 20.782C20.2843 20.5903 20.5903 20.2843 20.782 19.908C21 19.4802 21 18.9201 21 17.8V8.2C21 7.07989 21 6.51984 20.782 6.09202C20.5903 5.71569 20.2843 5.40973 19.908 5.21799C19.4802 5 18.9201 5 17.8 5H6.2C5.0799 5 4.51984 5 4.09202 5.21799C3.71569 5.40973 3.40973 5.71569 3.21799 6.09202C3 6.51984 3 7.07989 3 8.2V17.8C3 18.9201 3 19.4802 3.21799 19.908C3.40973 20.2843 3.71569 20.5903 4.09202 20.782C4.51984 21 5.07989 21 6.2 21Z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                  <svg
+                    width="64"
+                    height="64"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    xmlns="http://www.w3.org/2000/svg"
+                    style={{
+                      marginBottom: '16px',
+                      opacity: 0.5
+                    }}
+                  >
+                    <path
+                      d="M3 10H21M7 3V5M17 3V5M6.2 21H17.8C18.9201 21 19.4802 21 19.908 20.782C20.2843 20.5903 20.5903 20.2843 20.782 19.908C21 19.4802 21 18.9201 21 17.8V8.2C21 7.07989 21 6.51984 20.782 6.09202C20.5903 5.71569 20.2843 5.40973 19.908 5.21799C19.4802 5 18.9201 5 17.8 5H6.2C5.0799 5 4.51984 5 4.09202 5.21799C3.71569 5.40973 3.40973 5.71569 3.21799 6.09202C3 6.51984 3 7.07989 3 8.2V17.8C3 18.9201 3 19.4802 3.21799 19.908C3.40973 20.2843 3.71569 20.5903 4.09202 20.782C4.51984 21 5.07989 21 6.2 21Z"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
                   </svg>
-                  <h3 style={{ fontSize: '18px', fontWeight: '600', marginBottom: '8px' }}>No hay productos en esta lista</h3>
-                  <p style={{ fontSize: '14px' }}>Añade algunos productos usando el formulario de arriba</p>
+                  <h3 style={{
+                    fontSize: '18px',
+                    fontWeight: '600',
+                    marginBottom: '8px',
+                    color: '#374151'
+                  }}>
+                    No hay productos en esta lista
+                  </h3>
+                  <p style={{
+                    fontSize: '14px',
+                    color: '#6B7280',
+                    maxWidth: '300px',
+                    lineHeight: '1.5'
+                  }}>
+                    Añade algunos productos usando el formulario de arriba
+                  </p>
                 </div>
               )}
             </div>
@@ -2095,19 +2599,87 @@ ${participants.map((p, i) => `${i + 1}. ${p}: ${sharePerPerson.toFixed(2)} €`)
 
       {/* Modal de Observaciones */}
       {observationsDialogOpen && (
-        <div className="modal-overlay">
-          <div className="dialog-modal" style={{ backgroundColor: "white" }}>
-            <div className="dialog-header">
-              <h3 style={{ color: "black" }}>Observaciones - {allLists.find(list => list.id === currentList)?.name || "Lista actual"}</h3>
+        <div className="modal-overlay" style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0, 0, 0, 0.6)',
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          zIndex: 9999
+        }}>
+          <div className="dialog-modal" style={{
+            backgroundColor: 'white',
+            borderRadius: '12px',
+            boxShadow: '0 10px 30px rgba(0, 0, 0, 0.3)',
+            width: '90%',
+            maxWidth: '500px',
+            maxHeight: '90vh',
+            display: 'flex',
+            flexDirection: 'column',
+            overflow: 'hidden'
+          }}>
+            <div className="dialog-header" style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              padding: '20px 24px 0',
+              borderBottom: '1px solid #e5e7eb',
+              marginBottom: 0,
+              background: 'white'
+            }}>
+              <h3 style={{
+                margin: 0,
+                fontSize: '1.25rem',
+                fontWeight: '600',
+                color: '#1f2937'
+              }}>
+                Observaciones - {allLists.find(list => list.id === currentList)?.name || "Lista actual"}
+              </h3>
               <button
-                onClick={() => setObservationsDialogOpen(false)}
+                onClick={() => {
+                  setObservationsDialogOpen(false);
+                  setEditingObservations(false);
+                }}
                 className="close-btn"
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  fontSize: '1.5rem',
+                  cursor: 'pointer',
+                  color: '#6b7280',
+                  padding: '4px',
+                  borderRadius: '4px',
+                  transition: 'all 0.2s',
+                  lineHeight: 1,
+                  width: '32px',
+                  height: '32px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center'
+                }}
+                onMouseEnter={(e) => {
+                  e.target.style.backgroundColor = '#f3f4f6';
+                  e.target.style.color = '#374151';
+                }}
+                onMouseLeave={(e) => {
+                  e.target.style.backgroundColor = 'transparent';
+                  e.target.style.color = '#6b7280';
+                }}
               >
                 ×
               </button>
             </div>
 
-            <div className="dialog-content">
+            <div className="dialog-content" style={{
+              padding: '24px',
+              flex: 1,
+              overflowY: 'auto',
+              background: 'white'
+            }}>
               <textarea
                 value={editingObservations ? (listObservations[currentList] || "") : (listObservations[currentList] || "")}
                 onChange={(e) => !editingObservations ? null : setListObservations(prev => ({ ...prev, [currentList]: e.target.value }))}
@@ -2115,17 +2687,76 @@ ${participants.map((p, i) => `${i + 1}. ${p}: ${sharePerPerson.toFixed(2)} €`)
                 rows="6"
                 disabled={!editingObservations}
                 className="elegant-textarea"
-                style={{ color: "black", width: "100%" }}
+                style={{
+                  color: 'black',
+                  width: '100%',
+                  padding: '12px',
+                  border: '1px solid #d1d5db',
+                  borderRadius: '8px',
+                  fontSize: '16px',
+                  resize: 'vertical',
+                  minHeight: '120px',
+                  backgroundColor: editingObservations ? 'white' : '#f9fafb'
+                }}
               />
             </div>
 
-            <div className="dialog-buttons">
+            <div className="dialog-buttons" style={{
+              display: 'flex',
+              gap: '12px',
+              justifyContent: 'flex-end',
+              padding: '0 24px 24px',
+              flexWrap: 'wrap',
+              background: 'white'
+            }}>
               {!editingObservations ? (
                 <>
-                  <button onClick={() => setObservationsDialogOpen(false)} className="cancel-btn" style={{ color: "black" }}>
+                  <button
+                    onClick={() => setObservationsDialogOpen(false)}
+                    className="cancel-btn"
+                    style={{
+                      backgroundColor: '#f3f4f6',
+                      color: '#374151',
+                      border: '1px solid #d1d5db',
+                      padding: '10px 20px',
+                      borderRadius: '8px',
+                      cursor: 'pointer',
+                      fontWeight: '500',
+                      transition: 'all 0.2s',
+                      minWidth: '80px'
+                    }}
+                    onMouseEnter={(e) => {
+                      e.target.style.backgroundColor = '#e5e7eb';
+                      e.target.style.borderColor = '#9ca3af';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.target.style.backgroundColor = '#f3f4f6';
+                      e.target.style.borderColor = '#d1d5db';
+                    }}
+                  >
                     Cerrar
                   </button>
-                  <button onClick={() => setEditingObservations(true)} className="blue-button">
+                  <button
+                    onClick={() => setEditingObservations(true)}
+                    className="blue-button"
+                    style={{
+                      backgroundColor: '#3b82f6',
+                      color: 'white',
+                      border: 'none',
+                      padding: '10px 20px',
+                      borderRadius: '8px',
+                      cursor: 'pointer',
+                      fontWeight: '500',
+                      transition: 'all 0.2s',
+                      minWidth: '80px'
+                    }}
+                    onMouseEnter={(e) => {
+                      e.target.style.backgroundColor = '#2563eb';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.target.style.backgroundColor = '#3b82f6';
+                    }}
+                  >
                     Editar
                   </button>
                   {listObservations[currentList] && (
@@ -2135,7 +2766,25 @@ ${participants.map((p, i) => `${i + 1}. ${p}: ${sharePerPerson.toFixed(2)} €`)
                         setEditingObservations(false);
                       }}
                       className="cancel-btn"
-                      style={{ color: "black" }}
+                      style={{
+                        backgroundColor: '#f3f4f6',
+                        color: '#374151',
+                        border: '1px solid #d1d5db',
+                        padding: '10px 20px',
+                        borderRadius: '8px',
+                        cursor: 'pointer',
+                        fontWeight: '500',
+                        transition: 'all 0.2s',
+                        minWidth: '80px'
+                      }}
+                      onMouseEnter={(e) => {
+                        e.target.style.backgroundColor = '#e5e7eb';
+                        e.target.style.borderColor = '#9ca3af';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.target.style.backgroundColor = '#f3f4f6';
+                        e.target.style.borderColor = '#d1d5db';
+                      }}
                     >
                       Limpiar
                     </button>
@@ -2143,7 +2792,32 @@ ${participants.map((p, i) => `${i + 1}. ${p}: ${sharePerPerson.toFixed(2)} €`)
                 </>
               ) : (
                 <>
-                  <button onClick={() => setObservationsDialogOpen(false)} className="cancel-btn" style={{ color: "black" }}>
+                  <button
+                    onClick={() => {
+                      setObservationsDialogOpen(false);
+                      setEditingObservations(false);
+                    }}
+                    className="cancel-btn"
+                    style={{
+                      backgroundColor: '#f3f4f6',
+                      color: '#374151',
+                      border: '1px solid #d1d5db',
+                      padding: '10px 20px',
+                      borderRadius: '8px',
+                      cursor: 'pointer',
+                      fontWeight: '500',
+                      transition: 'all 0.2s',
+                      minWidth: '80px'
+                    }}
+                    onMouseEnter={(e) => {
+                      e.target.style.backgroundColor = '#e5e7eb';
+                      e.target.style.borderColor = '#9ca3af';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.target.style.backgroundColor = '#f3f4f6';
+                      e.target.style.borderColor = '#d1d5db';
+                    }}
+                  >
                     Cancelar
                   </button>
                   <button
@@ -2152,6 +2826,23 @@ ${participants.map((p, i) => `${i + 1}. ${p}: ${sharePerPerson.toFixed(2)} €`)
                       setEditingObservations(false);
                     }}
                     className="blue-button"
+                    style={{
+                      backgroundColor: '#3b82f6',
+                      color: 'white',
+                      border: 'none',
+                      padding: '10px 20px',
+                      borderRadius: '8px',
+                      cursor: 'pointer',
+                      fontWeight: '500',
+                      transition: 'all 0.2s',
+                      minWidth: '80px'
+                    }}
+                    onMouseEnter={(e) => {
+                      e.target.style.backgroundColor = '#2563eb';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.target.style.backgroundColor = '#3b82f6';
+                    }}
                   >
                     Guardar
                   </button>
@@ -2162,7 +2853,25 @@ ${participants.map((p, i) => `${i + 1}. ${p}: ${sharePerPerson.toFixed(2)} €`)
                       setEditingObservations(false);
                     }}
                     className="cancel-btn"
-                    style={{ color: "black" }}
+                    style={{
+                      backgroundColor: '#f3f4f6',
+                      color: '#374151',
+                      border: '1px solid #d1d5db',
+                      padding: '10px 20px',
+                      borderRadius: '8px',
+                      cursor: 'pointer',
+                      fontWeight: '500',
+                      transition: 'all 0.2s',
+                      minWidth: '80px'
+                    }}
+                    onMouseEnter={(e) => {
+                      e.target.style.backgroundColor = '#e5e7eb';
+                      e.target.style.borderColor = '#9ca3af';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.target.style.backgroundColor = '#f3f4f6';
+                      e.target.style.borderColor = '#d1d5db';
+                    }}
                   >
                     Limpiar
                   </button>
@@ -2173,22 +2882,88 @@ ${participants.map((p, i) => `${i + 1}. ${p}: ${sharePerPerson.toFixed(2)} €`)
         </div>
       )}
 
-      {/* Modal de Finalizar Compra */}
       {finalizeDialogOpen && (
-        <div className="modal-overlay">
-          <div className="dialog-modal" style={{ backgroundColor: "white" }}>
-            <div className="dialog-header">
-              <h3 style={{ color: "black" }}>Finalizar Compra</h3>
+        <div className="modal-overlay" style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0, 0, 0, 0.6)',
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          zIndex: 9999
+        }}>
+          <div className="dialog-modal" style={{
+            backgroundColor: 'white',
+            borderRadius: '12px',
+            boxShadow: '0 10px 30px rgba(0, 0, 0, 0.3)',
+            width: '90%',
+            maxWidth: '500px',
+            maxHeight: '90vh',
+            display: 'flex',
+            flexDirection: 'column',
+            overflow: 'hidden'
+          }}>
+            <div className="dialog-header" style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              padding: '20px 24px 0',
+              borderBottom: '1px solid #e5e7eb',
+              marginBottom: 0,
+              background: 'white'
+            }}>
+              <h3 style={{
+                margin: 0,
+                fontSize: '1.25rem',
+                fontWeight: '600',
+                color: '#1f2937'
+              }}>
+                Finalizar Compra
+              </h3>
               <button
                 onClick={() => setFinalizeDialogOpen(false)}
                 className="close-btn"
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  fontSize: '1.5rem',
+                  cursor: 'pointer',
+                  color: '#6b7280',
+                  padding: '4px',
+                  borderRadius: '4px',
+                  transition: 'all 0.2s',
+                  lineHeight: 1,
+                  width: '32px',
+                  height: '32px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center'
+                }}
+                onMouseEnter={(e) => {
+                  e.target.style.backgroundColor = '#f3f4f6';
+                  e.target.style.color = '#374151';
+                }}
+                onMouseLeave={(e) => {
+                  e.target.style.backgroundColor = 'transparent';
+                  e.target.style.color = '#6b7280';
+                }}
               >
                 ×
               </button>
             </div>
 
-            <div className="dialog-content">
-              <p style={{ color: "black" }}>Introduce el precio total de la compra:</p>
+            <div className="dialog-content" style={{
+              padding: '24px',
+              flex: 1,
+              overflowY: 'auto',
+              background: 'white'
+            }}>
+              <p style={{ color: 'black', marginBottom: '16px' }}>
+                Introduce el precio total de la compra:
+              </p>
               <input
                 type="number"
                 step="0.01"
@@ -2202,12 +2977,48 @@ ${participants.map((p, i) => `${i + 1}. ${p}: ${sharePerPerson.toFixed(2)} €`)
                 }}
                 placeholder="Precio total (ej: 45.50)"
                 className="elegant-input"
-                style={{ color: "black", width: "100%" }}
+                style={{
+                  color: 'grey',
+                  width: '100%',
+                  padding: '12px',
+                  border: '1px solid #d1d5db',
+                  borderRadius: '8px',
+                  fontSize: '16px'
+                }}
               />
             </div>
 
-            <div className="dialog-buttons">
-              <button onClick={() => setFinalizeDialogOpen(false)} className="cancel-btn" style={{ color: "black" }}>
+            <div className="dialog-buttons" style={{
+              display: 'flex',
+              gap: '12px',
+              justifyContent: 'flex-end',
+              padding: '0 24px 24px',
+              flexWrap: 'wrap',
+              background: 'white'
+            }}>
+              <button
+                onClick={() => setFinalizeDialogOpen(false)}
+                className="cancel-btn"
+                style={{
+                  backgroundColor: '#f3f4f6',
+                  color: '#374151',
+                  border: '1px solid #d1d5db',
+                  padding: '10px 20px',
+                  borderRadius: '8px',
+                  cursor: 'pointer',
+                  fontWeight: '500',
+                  transition: 'all 0.2s',
+                  minWidth: '80px'
+                }}
+                onMouseEnter={(e) => {
+                  e.target.style.backgroundColor = '#e5e7eb';
+                  e.target.style.borderColor = '#9ca3af';
+                }}
+                onMouseLeave={(e) => {
+                  e.target.style.backgroundColor = '#f3f4f6';
+                  e.target.style.borderColor = '#d1d5db';
+                }}
+              >
                 Cancelar
               </button>
               <button
@@ -2217,50 +3028,157 @@ ${participants.map((p, i) => `${i + 1}. ${p}: ${sharePerPerson.toFixed(2)} €`)
                   setFinalizeDialogOpen(false);
                 }}
                 className="blue-button"
+                style={{
+                  backgroundColor: '#3b82f6',
+                  color: 'white',
+                  border: 'none',
+                  padding: '10px 20px',
+                  borderRadius: '8px',
+                  cursor: 'pointer',
+                  fontWeight: '500',
+                  transition: 'all 0.2s',
+                  minWidth: '80px'
+                }}
+                onMouseEnter={(e) => {
+                  e.target.style.backgroundColor = '#2563eb';
+                }}
+                onMouseLeave={(e) => {
+                  e.target.style.backgroundColor = '#3b82f6';
+                }}
               >
-                {purchaseInfo[currentList]?.totalPrice ? "Guardar" : "Eliminar Precio"}
+                {purchaseInfo[currentList]?.totalPrice ? 'Guardar' : 'Eliminar Precio'}
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* Modal de Dividir Gastos */}
       {splitDialogOpen && (
-        <div className="modal-overlay">
-          <div className="dialog-modal" style={{ backgroundColor: "white" }}>
-            <div className="dialog-header">
-              <h3 style={{ color: "black" }}>División de Gastos</h3>
+        <div className="modal-overlay" style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0, 0, 0, 0.6)',
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          zIndex: 9999
+        }}>
+          <div className="dialog-modal" style={{
+            backgroundColor: 'white',
+            borderRadius: '12px',
+            boxShadow: '0 10px 30px rgba(0, 0, 0, 0.3)',
+            width: '90%',
+            maxWidth: '500px',
+            maxHeight: '90vh',
+            display: 'flex',
+            flexDirection: 'column',
+            overflow: 'hidden'
+          }}>
+            <div className="dialog-header" style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              padding: '20px 24px 0',
+              borderBottom: '1px solid #e5e7eb',
+              marginBottom: 0,
+              background: 'white'
+            }}>
+              <h3 style={{
+                margin: 0,
+                fontSize: '1.25rem',
+                fontWeight: '600',
+                color: '#1f2937'
+              }}>
+                División de Gastos
+              </h3>
               <button
                 onClick={() => setSplitDialogOpen(false)}
                 className="close-btn"
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  fontSize: '1.5rem',
+                  cursor: 'pointer',
+                  color: '#6b7280',
+                  padding: '4px',
+                  borderRadius: '4px',
+                  transition: 'all 0.2s',
+                  lineHeight: 1,
+                  width: '32px',
+                  height: '32px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center'
+                }}
+                onMouseEnter={(e) => {
+                  e.target.style.backgroundColor = '#f3f4f6';
+                  e.target.style.color = '#374151';
+                }}
+                onMouseLeave={(e) => {
+                  e.target.style.backgroundColor = 'transparent';
+                  e.target.style.color = '#6b7280';
+                }}
               >
                 ×
               </button>
             </div>
 
-            <div className="dialog-content">
+            <div className="dialog-content" style={{
+              padding: '24px',
+              flex: 1,
+              overflowY: 'auto',
+              background: 'white'
+            }}>
               {(() => {
                 const totalPrice = purchaseInfo[currentList]?.totalPrice ||
                   Object.values(itemPrices[currentList] || {}).reduce((sum, price) => sum + price.amount, 0);
                 const participants = [auth.currentUser?.email || "Tú", ...(allLists.find(list => list.id === currentList)?.sharedWith || [])];
 
                 if (!totalPrice || totalPrice === 0) {
-                  return <p style={{ color: "black" }}>Primero establece el precio total de la compra usando 'Finalizar Compra'</p>;
+                  return (
+                    <p style={{ color: 'black' }}>
+                      Primero establece el precio total de la compra usando 'Finalizar Compra'
+                    </p>
+                  );
                 }
 
                 const sharePerPerson = totalPrice / participants.length;
-                const result = `Resumen de Gastos\n\nTotal gastado: ${totalPrice.toFixed(2)} €\nNúmero de personas: ${participants.length}\nPrecio por persona: ${sharePerPerson.toFixed(2)} €\n\n${participants.map((p, i) => `${i + 1}. ${p}: ${sharePerPerson.toFixed(2)} €`).join('\n')}`;
 
                 return (
-                  <div className="split-result">
-                    <p style={{ color: "black" }}><strong>Total:</strong> {totalPrice.toFixed(2)} €</p>
-                    <p style={{ color: "black" }}><strong>Personas:</strong> {participants.length}</p>
-                    <p style={{ color: "black" }}><strong>Por persona:</strong> {sharePerPerson.toFixed(2)} €</p>
+                  <div className="split-result" style={{
+                    backgroundColor: '#f8fafc',
+                    padding: '20px',
+                    borderRadius: '8px',
+                    margin: '16px 0'
+                  }}>
+                    <p style={{ color: 'black', marginBottom: '8px' }}>
+                      <strong>Total:</strong> {totalPrice.toFixed(2)} €
+                    </p>
+                    <p style={{ color: 'black', marginBottom: '8px' }}>
+                      <strong>Personas:</strong> {participants.length}
+                    </p>
+                    <p style={{ color: 'black', marginBottom: '16px' }}>
+                      <strong>Por persona:</strong> {sharePerPerson.toFixed(2)} €
+                    </p>
                     <div className="participants-list">
                       {participants.map((participant, index) => (
-                        <div key={index} className="participant" style={{ color: "black" }}>
-                          {participant}: <strong>{sharePerPerson.toFixed(2)} €</strong>
+                        <div
+                          key={index}
+                          className="participant"
+                          style={{
+                            color: 'black',
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
+                            padding: '8px 0',
+                            borderBottom: '1px solid #e5e7eb'
+                          }}
+                        >
+                          <span>{participant}</span>
+                          <strong>{sharePerPerson.toFixed(2)} €</strong>
                         </div>
                       ))}
                     </div>
@@ -2269,8 +3187,37 @@ ${participants.map((p, i) => `${i + 1}. ${p}: ${sharePerPerson.toFixed(2)} €`)
               })()}
             </div>
 
-            <div className="dialog-buttons">
-              <button onClick={() => setSplitDialogOpen(false)} className="cancel-btn" style={{ color: "black" }}>
+            <div className="dialog-buttons" style={{
+              display: 'flex',
+              gap: '12px',
+              justifyContent: 'flex-end',
+              padding: '0 24px 24px',
+              flexWrap: 'wrap',
+              background: 'white'
+            }}>
+              <button
+                onClick={() => setSplitDialogOpen(false)}
+                className="cancel-btn"
+                style={{
+                  backgroundColor: '#f3f4f6',
+                  color: '#374151',
+                  border: '1px solid #d1d5db',
+                  padding: '10px 20px',
+                  borderRadius: '8px',
+                  cursor: 'pointer',
+                  fontWeight: '500',
+                  transition: 'all 0.2s',
+                  minWidth: '80px'
+                }}
+                onMouseEnter={(e) => {
+                  e.target.style.backgroundColor = '#e5e7eb';
+                  e.target.style.borderColor = '#9ca3af';
+                }}
+                onMouseLeave={(e) => {
+                  e.target.style.backgroundColor = '#f3f4f6';
+                  e.target.style.borderColor = '#d1d5db';
+                }}
+              >
                 Cerrar
               </button>
               <button
@@ -2281,6 +3228,23 @@ ${participants.map((p, i) => `${i + 1}. ${p}: ${sharePerPerson.toFixed(2)} €`)
                   splitExpenses(totalPrice, participants);
                 }}
                 className="blue-button"
+                style={{
+                  backgroundColor: '#3b82f6',
+                  color: 'white',
+                  border: 'none',
+                  padding: '10px 20px',
+                  borderRadius: '8px',
+                  cursor: 'pointer',
+                  fontWeight: '500',
+                  transition: 'all 0.2s',
+                  minWidth: '80px'
+                }}
+                onMouseEnter={(e) => {
+                  e.target.style.backgroundColor = '#2563eb';
+                }}
+                onMouseLeave={(e) => {
+                  e.target.style.backgroundColor = '#3b82f6';
+                }}
               >
                 Calcular
               </button>
@@ -2293,55 +3257,28 @@ ${participants.map((p, i) => `${i + 1}. ${p}: ${sharePerPerson.toFixed(2)} €`)
                   const result = `Resumen de Gastos\n\nTotal gastado: ${totalPrice.toFixed(2)} €\nNúmero de personas: ${participants.length}\nPrecio por persona: ${sharePerPerson.toFixed(2)} €\n\n${participants.map((p, i) => `${i + 1}. ${p}: ${sharePerPerson.toFixed(2)} €`).join('\n')}`;
 
                   navigator.clipboard.writeText(result);
-                  alert("Copiado al portapapeles");
+                  showToast("Resumen copiado al portapapeles", 'success');
                 }}
                 className="blue-button"
+                style={{
+                  backgroundColor: '#10b981',
+                  color: 'white',
+                  border: 'none',
+                  padding: '10px 20px',
+                  borderRadius: '8px',
+                  cursor: 'pointer',
+                  fontWeight: '500',
+                  transition: 'all 0.2s',
+                  minWidth: '80px'
+                }}
+                onMouseEnter={(e) => {
+                  e.target.style.backgroundColor = '#059669';
+                }}
+                onMouseLeave={(e) => {
+                  e.target.style.backgroundColor = '#10b981';
+                }}
               >
                 Copiar
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Modal de Información Adicional */}
-      {extraInfoDialogOpen && (
-        <div className="modal-overlay">
-          <div className="dialog-modal" style={{ backgroundColor: "white" }}>
-            <div className="dialog-header">
-              <h3 style={{ color: "black" }}>Información Adicional</h3>
-              <button
-                onClick={() => setExtraInfoDialogOpen(false)}
-                className="close-btn"
-              >
-                ×
-              </button>
-            </div>
-
-            <div className="dialog-content">
-              <p style={{ color: "black" }}>Añade información general sobre la compra:</p>
-              <textarea
-                value={extraInfo[currentList] || ""}
-                onChange={(e) => setExtraInfo(prev => ({ ...prev, [currentList]: e.target.value }))}
-                placeholder="Ej: Compra en Mercadona, productos de oferta, etc."
-                rows="4"
-                className="elegant-textarea"
-                style={{ color: "black", width: "100%" }}
-              />
-            </div>
-
-            <div className="dialog-buttons">
-              <button onClick={() => setExtraInfoDialogOpen(false)} className="cancel-btn" style={{ color: "black" }}>
-                Cancelar
-              </button>
-              <button
-                onClick={() => {
-                  saveExtraInfo(currentList, extraInfo[currentList] || "");
-                  setExtraInfoDialogOpen(false);
-                }}
-                className="blue-button"
-              >
-                Guardar
               </button>
             </div>
           </div>
@@ -2375,28 +3312,30 @@ ${participants.map((p, i) => `${i + 1}. ${p}: ${sharePerPerson.toFixed(2)} €`)
           height: 100%;
         }
         
-        .app-container {
+        .elegant-app-container {
           min-height: 100vh;
           display: flex;
           flex-direction: column;
-          background-image: url('https://images.unsplash.com/photo-1606787366850-de6330128bfc?ixlib=rb-1.2.1&auto=format&fit=crop&w=1350&q=80');
-          background-size: cover;
-          background-position: center;
-          background-attachment: fixed;
-          background-repeat: no-repeat;
+          background-color: #F3F4F6;
         }
         
-        .app-navbar {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          padding: 15px 20px;
-          background-color: var(--white);
-          border-bottom: 1px solid #e0e0e0;
+        .elegant-navbar {
+          background-color: white;
+          box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+          padding: 16px 0;
+          margin-bottom: 24px;
           width: 100%;
-          position: sticky;
-          top: 0;
-          z-index: 100;
+        }
+        
+        .navbar-content {
+          max-width: 1200px;
+          margin: 0 auto;
+          padding: 0 20px;
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          flex-wrap: wrap;
+          gap: 16px;
         }
         
         .logo-container {
@@ -2411,48 +3350,32 @@ ${participants.map((p, i) => `${i + 1}. ${p}: ${sharePerPerson.toFixed(2)} €`)
           color: var(--primary-blue);
         }
         
-        .logout-btn {
-          background: #f0f0f0;
-          border: 1px solid #e0e0e0;
-          cursor: pointer;
-          padding: 8px;
-          border-radius: 50%;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          transition: all 0.3s ease;
-        }
-        
-        .logout-btn:hover {
-          background-color: #e0e0e0;
-        }
-        
-        .main-content {
-          flex: 1;
-          padding: 20px;
-          display: flex;
-          justify-content: center;
+        .elegant-main-content {
+          max-width: 1200px;
+          margin: 0 auto;
+          padding: 0 20px;
           width: 100%;
-          overflow: hidden;
         }
         
-        .content-card {
-          width: 100%;
-          max-width: 800px;
+        .elegant-content-card {
           background-color: var(--white);
           padding: 25px;
           border-radius: 12px;
           box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
           border: 1px solid #e0e0e0;
           margin: 0 auto;
-          overflow: hidden;
+          width: 100%;
         }
         
-        .list-creation {
+        .elegant-list-creator {
           display: flex;
-          gap: 10px;
-          margin-bottom: 20px;
-          width: 100%;
+          gap: 12px;
+          margin-bottom: 24px;
+          padding: 16px;
+          background-color: #F8FAFC;
+          border-radius: 12px;
+          border: 1px solid #E2E8F0;
+          flex-wrap: wrap;
         }
         
         .elegant-input {
@@ -2464,8 +3387,7 @@ ${participants.map((p, i) => `${i + 1}. ${p}: ${sharePerPerson.toFixed(2)} €`)
           transition: all 0.3s ease;
           background-color: var(--white);
           color: var(--text-color);
-          min-width: 0;
-          width: 100%;
+          min-width: 200px;
         }
 
         .elegant-input {
@@ -2507,42 +3429,47 @@ ${participants.map((p, i) => `${i + 1}. ${p}: ${sharePerPerson.toFixed(2)} €`)
           box-shadow: 0 0 0 3px rgba(30, 136, 229, 0.1);
         }
         
-        .add-button {
-          border: 1px solid var(--dark-blue);
-          padding: 10px 16px;
+        .elegant-create-btn, .elegant-add-btn {
+          border: none;
+          padding: 12px 20px;
           border-radius: 8px;
           cursor: pointer;
           display: flex;
           align-items: center;
           justify-content: center;
           transition: all 0.3s ease;
-          min-width: 48px;
+          font-size: 16px;
+          font-weight: 600;
+          gap: 8px;
           white-space: nowrap;
         }
         
-        .add-button:hover {
-          background-color: var(--light-blue);
+        .elegant-create-btn:hover, .elegant-add-btn:hover {
+          transform: translateY(-1px);
         }
         
-        .add-button:disabled {
+        .elegant-create-btn:disabled, .elegant-add-btn:disabled {
           opacity: 0.6;
           cursor: not-allowed;
+          transform: none;
         }
         
-        .list-selector-container {
+        .elegant-list-selector {
           margin-bottom: 20px;
           width: 100%;
         }
         
-        .list-selector {
+        .selector-header {
           display: flex;
           gap: 10px;
           align-items: center;
           width: 100%;
+          flex-wrap: wrap;
+          margin-bottom: 16px;
         }
         
         .elegant-select {
-          flex: 1;
+          width: 100%;
           padding: 12px 15px;
           border: 1px solid #e2e8f0;
           border-radius: 8px;
@@ -2554,30 +3481,30 @@ ${participants.map((p, i) => `${i + 1}. ${p}: ${sharePerPerson.toFixed(2)} €`)
           background-repeat: no-repeat;
           background-position: right 10px center;
           background-size: 1em;
-          min-width: 0;
-          width: 100%;
         }
         
         .list-actions {
           display: flex;
-          gap: 5px;
+          gap: 8px;
+          flex-wrap: wrap;
         }
         
-        .action-btn {
+        .elegant-action-btn {
           background: #f0f0f0;
           border: 1px solid #e0e0e0;
           cursor: pointer;
-          padding: 8px;
-          border-radius: 50%;
+          padding: 8px 12px;
+          border-radius: 8px;
           display: flex;
           align-items: center;
           justify-content: center;
           transition: all 0.3s ease;
-          min-width: 36px;
-          min-height: 36px;
+          gap: 6px;
+          font-size: 14px;
+          font-weight: 500;
         }
         
-        .action-btn:hover {
+        .elegant-action-btn:hover {
           background-color: #e0e0e0;
         }
 
@@ -2590,61 +3517,49 @@ ${participants.map((p, i) => `${i + 1}. ${p}: ${sharePerPerson.toFixed(2)} €`)
           background-color: #f5f5f5;
         }
         
-        .action-btn:disabled {
+        .elegant-action-btn:disabled {
           opacity: 0.5;
           cursor: not-allowed;
         }
         
-        .no-lists-message {
+        .elegant-empty-state {
           text-align: center;
           color: var(--dark-gray);
           margin: 20px 0;
+          padding: 40px 20px;
         }
         
-        .items-section {
+        .elegant-items-section {
           margin-top: 20px;
           width: 100%;
         }
         
-        .items-header {
+        .section-header {
           display: flex;
           justify-content: space-between;
           align-items: center;
           margin-bottom: 15px;
+          flex-wrap: wrap;
+          gap: 12px;
         }
         
-        .sort-checkbox {
+        .items-stats {
+          font-size: 14px;
+          color: #6B7280;
+          background-color: #F3F4F6;
+          padding: 4px 12px;
+          border-radius: 20px;
+        }
+        
+        .elegant-item-adder {
           display: flex;
-          align-items: center;
-          gap: 8px;
-          color: black;
-          cursor: pointer;
-        }
-        
-        .sort-checkbox input {
-          width: 18px;
-          height: 18px;
-          cursor: pointer;
-        }
-        
-        .item-input-container {
-          display: flex;
-          gap: 10px;
+          gap: 12px;
           margin-bottom: 20px;
           width: 100%;
+          flex-wrap: wrap;
         }
         
-        .category-select {
-          padding: 12px 15px;
-          border: 1px solid #e2e8f0;
-          border-radius: 8px;
-          font-size: 1rem;
-          background-color: var(--white);
-          color: var(--text-color);
-          min-width: 180px;
-        }
-        
-        .items-list {
+        .elegant-items-list {
           list-style: none;
           width: 100%;
           padding: 0;
@@ -2652,28 +3567,34 @@ ${participants.map((p, i) => `${i + 1}. ${p}: ${sharePerPerson.toFixed(2)} €`)
         }
         
         .category-header {
-          padding: 8px 15px;
+          padding: 12px 16px;
           border-radius: 8px;
-          margin: 10px 0 5px 0;
+          margin: 16px 0 8px 0;
           font-weight: bold;
           color: var(--text-color);
+          display: flex;
+          align-items: center;
+          gap: 8px;
         }
         
-        .item-card {
+        .elegant-item {
           display: flex;
           justify-content: space-between;
           align-items: center;
-          padding: 12px 15px;
+          padding: 12px 16px;
           background-color: var(--white);
-          border-radius: 8px;
-          margin-bottom: 10px;
-          border: 1px solid #e0e0e0;
+          border-radius: 12px;
+          margin-bottom: 8px;
+          box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+          border-left: 4px solid;
+          transition: all 0.3s ease;
           width: 100%;
-          max-width: 100%;
+          flex-wrap: wrap;
         }
         
-        .item-card.completed {
-          background-color: var(--completed-item);
+        .elegant-item:hover {
+          transform: translateY(-2px);
+          box-shadow: 0 4px 12px rgba(0,0,0,0.15);
         }
         
         .item-content {
@@ -2683,13 +3604,14 @@ ${participants.map((p, i) => `${i + 1}. ${p}: ${sharePerPerson.toFixed(2)} €`)
           flex: 1;
           min-width: 0;
           overflow: hidden;
+          flex-wrap: wrap;
         }
         
-        .item-checkbox {
+        .elegant-checkbox {
           min-width: 20px;
           min-height: 20px;
           cursor: pointer;
-          accent-color: var(--primary-blue);
+          accent-color: #10B981;
           flex-shrink: 0;
         }
         
@@ -2697,31 +3619,50 @@ ${participants.map((p, i) => `${i + 1}. ${p}: ${sharePerPerson.toFixed(2)} €`)
           flex: 1;
           color: var(--text-color);
           font-size: 1rem;
-          white-space: nowrap;
-          overflow: hidden;
-          text-overflow: ellipsis;
+          min-width: 0;
         }
         
-        .strikethrough {
-          text-decoration: line-through;
-          color: var(--dark-gray);
+        .item-metadata {
+          font-size: 12px;
+          color: #6B7280;
+          margin-top: 4px;
         }
         
-        .delete-item-btn {
-          background: transparent;
+        .item-actions {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          flex-shrink: 0;
+        }
+        
+        .item-price {
+          background-color: #10B981;
+          color: white;
+          padding: 4px 8px;
+          border-radius: 6px;
+          font-size: 14px;
+          font-weight: 600;
+        }
+        
+        .elegant-delete-btn {
+          background: none;
           border: none;
           cursor: pointer;
-          padding: 5px;
+          padding: 4px;
           border-radius: 4px;
           display: flex;
           align-items: center;
           justify-content: center;
-          transition: all 0.3s ease;
-          flex-shrink: 0;
+          transition: all 0.2s;
         }
         
-        .delete-item-btn:hover {
-          background-color: #ffebee;
+        .elegant-delete-btn:hover {
+          background-color: #FEF2F2;
+        }
+        
+        .elegant-delete-btn:disabled {
+          opacity: 0.5;
+          cursor: not-allowed;
         }
         
         .blue-button {
@@ -2813,7 +3754,7 @@ ${participants.map((p, i) => `${i + 1}. ${p}: ${sharePerPerson.toFixed(2)} €`)
         padding: 4px;
         border-radius: 4px;
         transition: all 0.2s;
-        line-height: 1;
+        lineHeight: 1;
         width: 32px;
         height: 32px;
         display: flex;
@@ -2896,10 +3837,12 @@ ${participants.map((p, i) => `${i + 1}. ${p}: ${sharePerPerson.toFixed(2)} €`)
         display: flex;
         gap: 12px;
         margin-bottom: 20px;
+        flex-wrap: wrap;
       }
 
       .share-input .elegant-input {
         flex: 1;
+        min-width: 200px;
       }
 
       .share-info {
@@ -2938,6 +3881,8 @@ ${participants.map((p, i) => `${i + 1}. ${p}: ${sharePerPerson.toFixed(2)} €`)
         align-items: center;
         padding: 12px 0;
         border-bottom: 1px solid #e5e7eb;
+        flex-wrap: wrap;
+        gap: 8px;
       }
 
       .shared-users li:last-child {
@@ -2953,6 +3898,7 @@ ${participants.map((p, i) => `${i + 1}. ${p}: ${sharePerPerson.toFixed(2)} €`)
         cursor: pointer;
         font-size: 0.875rem;
         transition: all 0.2s;
+        white-space: nowrap;
       }
 
       .unshare-btn:hover {
@@ -2987,6 +3933,7 @@ ${participants.map((p, i) => `${i + 1}. ${p}: ${sharePerPerson.toFixed(2)} €`)
         align-items: center;
         padding: 8px 0;
         border-bottom: 1px solid #e5e7eb;
+        flex-wrap: wrap;
       }
 
       .participant:last-child {
@@ -3034,6 +3981,15 @@ ${participants.map((p, i) => `${i + 1}. ${p}: ${sharePerPerson.toFixed(2)} €`)
         }
       }
 
+      @keyframes spin {
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
+      }
+      
+      .elegant-spinner {
+        animation: spin 1s linear infinite;
+      }
+
       /* Responsive para modales */
       @media (max-width: 640px) {
         .modal-overlay {
@@ -3071,6 +4027,41 @@ ${participants.map((p, i) => `${i + 1}. ${p}: ${sharePerPerson.toFixed(2)} €`)
           height: 28px;
           font-size: 1.25rem;
         }
+
+        .elegant-list-creator {
+          flex-direction: column;
+        }
+
+        .elegant-item-adder {
+          flex-direction: column;
+        }
+
+        .selector-header {
+          flex-direction: column;
+          align-items: flex-start;
+        }
+
+        .list-actions {
+          width: 100%;
+          justify-content: flex-start;
+        }
+
+        .section-header {
+          flex-direction: column;
+          align-items: flex-start;
+        }
+
+        .item-content {
+          flex-direction: column;
+          align-items: flex-start;
+          gap: 8px;
+        }
+
+        .item-actions {
+          width: 100%;
+          justify-content: flex-end;
+          margin-top: 8px;
+        }
       }
 
       /* Scroll personalizado para modales */
@@ -3106,6 +4097,8 @@ ${participants.map((p, i) => `${i + 1}. ${p}: ${sharePerPerson.toFixed(2)} €`)
           justify-content: space-between;
           align-items: center;
           margin-bottom: 12px;
+          flex-wrap: wrap;
+          gap: 8px;
         }
 
         .list-info-header h4 {
@@ -3117,6 +4110,7 @@ ${participants.map((p, i) => `${i + 1}. ${p}: ${sharePerPerson.toFixed(2)} €`)
         .list-info-actions {
           display: flex;
           gap: 8px;
+          flex-wrap: wrap;
         }
 
         .list-info-actions .action-btn {
@@ -3152,19 +4146,9 @@ ${participants.map((p, i) => `${i + 1}. ${p}: ${sharePerPerson.toFixed(2)} €`)
           font-size: 0.9rem;
         }
 
-        .item-metadata {
-          margin-top: 4px;
-          font-size: 0.8rem;
-          color: #6c757d;
-        }
-
         .purchaser-info, .added-by-info {
           display: block;
           margin-top: 2px;
-        }
-
-        .item-price {
-          margin-top: 4px;
         }
 
         .price-tag {
@@ -3174,12 +4158,6 @@ ${participants.map((p, i) => `${i + 1}. ${p}: ${sharePerPerson.toFixed(2)} €`)
           border-radius: 4px;
           font-size: 0.8rem;
           font-weight: bold;
-        }
-
-        .item-actions {
-          display: flex;
-          gap: 8px;
-          align-items: center;
         }
 
         .price-btn {
@@ -3198,25 +4176,38 @@ ${participants.map((p, i) => `${i + 1}. ${p}: ${sharePerPerson.toFixed(2)} €`)
           color: white;
         }
 
-        @keyframes spin {
-          0% { transform: rotate(0deg); }
-          100% { transform: rotate(360deg); }
+        /* Responsive adicional */
+        @media (max-width: 480px) {
+          .elegant-content-card {
+            padding: 16px;
+          }
+          
+          .navbar-content {
+            flex-direction: column;
+            gap: 12px;
+          }
+          
+          .elegant-navbar {
+            padding: 12px 0;
+          }
+          
+          .elegant-main-content {
+            padding: 0 16px;
+          }
         }
-        
-        .elegant-spinner {
-          animation: spin 1s linear infinite;
-        }
-        
-        .elegant-item {
-          transition: all 0.3s ease;
-        }
-        
-        .elegant-item:hover {
-          transform: translateY(-2px);
-          box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+
+        @media (max-width: 768px) {
+          .category-header {
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 8px;
+          }
+          
+          .category-header span:last-child {
+            margin-left: 0;
+          }
         }
 `}</style>
-
     </div>
   );
 }
