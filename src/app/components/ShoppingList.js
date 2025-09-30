@@ -1,42 +1,47 @@
 import React from 'react';
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef } from "react";
 import { db, auth } from "../firebase";
 import { collection, addDoc, query, where, onSnapshot, deleteDoc, writeBatch, getDocs, arrayUnion, arrayRemove, getDoc } from "firebase/firestore";
 import { doc, updateDoc, setDoc } from "firebase/firestore";
 import { signOut, onAuthStateChanged } from "firebase/auth";
 import { ToastContainer, toast } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
+import { FileText, Users, ShoppingCart } from "lucide-react";
+
 
 export function ShoppingList() {
-  const [items, setItems] = useState([]);
-  const [lists, setLists] = useState([]);
-  const [sharedLists, setSharedLists] = useState([]);
-  const [currentList, setCurrentList] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
-  const [confirmDelete, setConfirmDelete] = useState(null);
-  const [confirmListDelete, setConfirmListDelete] = useState(null);
-  const [shareDialogOpen, setShareDialogOpen] = useState(false);
-  const [emailToShare, setEmailToShare] = useState("");
-  const [sharedUsers, setSharedUsers] = useState([]);
-  const [unshareDialogOpen, setUnshareDialogOpen] = useState(false);
-  const [userToUnshare, setUserToUnshare] = useState("");
-  const [userReady, setUserReady] = useState(false);
-  const [emailValidation, setEmailValidation] = useState({ valid: true, message: "" });
-  const [listObservations, setListObservations] = useState({});
-  const [itemPrices, setItemPrices] = useState({});
+  // Estados principales de la aplicación
+  const [items, setItems] = useState([]); // Lista de productos
+  const [lists, setLists] = useState([]); // Listas del usuario
+  const [sharedLists, setSharedLists] = useState([]); // Listas compartidas con el usuario
+  const [currentList, setCurrentList] = useState(""); // Lista actualmente seleccionada
+  const [loading, setLoading] = useState(false); // Estado de carga
+  const [error, setError] = useState(null); // Manejo de errores
   const [purchaseInfo, setPurchaseInfo] = useState({});
-  const [extraInfo, setExtraInfo] = useState({});
-  const [observationsDialogOpen, setObservationsDialogOpen] = useState(false);
-  const [finalizeDialogOpen, setFinalizeDialogOpen] = useState(false);
-  const [splitDialogOpen, setSplitDialogOpen] = useState(false);
-  const [editingObservations, setEditingObservations] = useState(false);
 
-  const allLists = [...lists, ...sharedLists];
+  // Estados para confirmaciones y diálogos
+  const [confirmDelete, setConfirmDelete] = useState(null); // Confirmación eliminar producto
+  const [confirmListDelete, setConfirmListDelete] = useState(null); // Confirmación eliminar lista
+  const [shareDialogOpen, setShareDialogOpen] = useState(false); // Diálogo compartir lista
+  const [emailToShare, setEmailToShare] = useState(""); // Email para compartir
+  const [sharedUsers, setSharedUsers] = useState([]); // Usuarios con quienes se compartió
+  const [unshareDialogOpen, setUnshareDialogOpen] = useState(false); // Diálogo dejar de compartir
+  const [userToUnshare, setUserToUnshare] = useState(""); // Usuario para dejar de compartir
+  const [userReady, setUserReady] = useState(false); // Usuario autenticado y listo
+
+  // Estados para validación y observaciones
+  const [emailValidation, setEmailValidation] = useState({ valid: true, message: "" });
+  const [listObservations, setListObservations] = useState({}); // Observaciones por lista
+  const [observationsDialogOpen, setObservationsDialogOpen] = useState(false); // Diálogo observaciones
+  const [finalizeDialogOpen, setFinalizeDialogOpen] = useState(false); // Diálogo finalizar compra
+  const [splitDialogOpen, setSplitDialogOpen] = useState(false); // Diálogo dividir gastos
+  const [editingObservations, setEditingObservations] = useState(false); // Modo edición observaciones
+
+  // Referencias para cache
   const itemsCache = useRef({});
   const listsCache = useRef({ userLists: [], sharedLists: [] });
 
-  // Categorías mejoradas con íconos y colores
+  // Categorías mejoradas con íconos y colores para organización visual
   const CATEGORIES = {
     "FRUITS_VEGETABLES": {
       name: "Frutas y Verduras",
@@ -136,12 +141,12 @@ export function ShoppingList() {
     }
   };
 
-  // Función para mostrar toasts
+  // Función para mostrar notificaciones toast
   const showToast = (message, type = 'info') => {
     const toastConfig = {
       position: "top-center",
       autoClose: 3000,
-      hideProgressBar: false,
+      hideProgressBar: true,
       closeOnClick: true,
       pauseOnHover: true,
       draggable: true,
@@ -164,7 +169,7 @@ export function ShoppingList() {
     }
   };
 
-  // Función mejorada para detectar categorías
+  // Función para detectar categoría automáticamente basada en el nombre del producto
   const detectCategory = (productName) => {
     if (productName.startsWith("[COMPLETADO]")) {
       return "COMPRADO";
@@ -193,12 +198,21 @@ export function ShoppingList() {
     return "OTHER";
   };
 
-  // Función para obtener información de categoría
+  // Obtener información de categoría por su ID
   const getCategoryInfo = (category) => {
     return CATEGORIES[category] || CATEGORIES.OTHER;
   };
 
-  // Hook personalizado para gestión de listas - SIMPLIFICADO
+  // Función para abrir el diálogo de compartir lista
+  const openShareDialog = () => {
+    if (!currentList) return;
+
+    const currentListData = [...lists, ...sharedLists].find(list => list.id === currentList);
+    setSharedUsers(currentListData?.sharedWith || []);
+    setShareDialogOpen(true);
+  };
+
+  // Crear una nueva lista de compras
   const createElegantList = async (listName) => {
     if (!auth.currentUser?.uid || !listName.trim()) {
       throw new Error("Nombre de lista inválido");
@@ -216,7 +230,7 @@ export function ShoppingList() {
         isOptimistic: true
       };
 
-      // Actualización optimista
+      // Actualización optimista para respuesta inmediata
       setLists(prev => [...prev, tempList]);
       setCurrentList(tempId);
 
@@ -244,7 +258,7 @@ export function ShoppingList() {
 
     } catch (err) {
       console.error("Error creando lista:", err);
-      // Revertir actualización optimista
+      // Revertir actualización optimista en caso de error
       setLists(prev => prev.filter(list => list.id !== tempId));
       if (currentList === tempId) {
         setCurrentList(lists[0]?.id || "");
@@ -253,6 +267,7 @@ export function ShoppingList() {
     }
   };
 
+  // Añadir un nuevo producto a la lista actual
   const addElegantItem = async (itemText) => {
     if (!userReady || !auth.currentUser?.uid || !currentList || !itemText.trim()) {
       throw new Error("Datos inválidos para añadir item");
@@ -307,6 +322,7 @@ export function ShoppingList() {
     }
   };
 
+  // Alternar estado de completado de un producto
   const toggleItemCompletion = async (itemId, currentStatus) => {
     if (!itemId || !auth.currentUser) {
       console.log('ID de item no válido o usuario no autenticado:', itemId);
@@ -336,7 +352,7 @@ export function ShoppingList() {
           : item
       ));
 
-      // Preparar datos para Firebase - MÁS ROBUSTO
+      // Preparar datos para Firebase
       const updates = {
         completed: newCompletedStatus,
         category: newCompletedStatus ? "COMPRADO" : detectCategory(currentItem.text),
@@ -379,7 +395,7 @@ export function ShoppingList() {
     }
   };
 
-  // Cargar observaciones de la lista
+  // Cargar observaciones de la lista desde Firebase
   const loadListObservations = async (listId) => {
     try {
       const obsDoc = await getDoc(doc(db, "listObservations", listId));
@@ -400,7 +416,7 @@ export function ShoppingList() {
     }
   };
 
-  // Guardar observaciones de la lista
+  // Guardar observaciones de la lista en Firebase
   const saveListObservations = async (listId, observations) => {
     try {
       await setDoc(doc(db, "listObservations", listId), {
@@ -420,766 +436,7 @@ export function ShoppingList() {
     }
   };
 
-  // Cargar información de compra
-  const loadPurchaseInfo = async (listId) => {
-    try {
-      const listDoc = await getDoc(doc(db, "lists", listId));
-      if (listDoc.exists()) {
-        const data = listDoc.data();
-        setPurchaseInfo(prev => ({
-          ...prev,
-          [listId]: data.purchaseInfo || null
-        }));
-        setExtraInfo(prev => ({
-          ...prev,
-        }));
-      }
-    } catch (error) {
-      console.error("Error cargando información de compra:", error);
-    }
-  };
-
-  // Finalizar compra - guardar precio total
-  const finalizePurchase = async (listId, totalPrice) => {
-    try {
-      if (totalPrice !== null) {
-        const purchaseInfoData = {
-          totalPrice: parseFloat(totalPrice),
-          finalizedAt: new Date(),
-          finalizedBy: auth.currentUser?.email || "",
-          autoCalculated: false
-        };
-
-        await updateDoc(doc(db, "lists", listId), {
-          purchaseInfo: purchaseInfoData
-        });
-
-        setPurchaseInfo(prev => ({
-          ...prev,
-          [listId]: purchaseInfoData
-        }));
-
-        showToast(`Precio guardado: ${totalPrice} €`, 'success');
-      } else {
-        await updateDoc(doc(db, "lists", listId), {
-          purchaseInfo: null
-        });
-
-        setPurchaseInfo(prev => ({
-          ...prev,
-          [listId]: null
-        }));
-
-        showToast("Precio eliminado", 'info');
-      }
-    } catch (error) {
-      console.error("Error finalizando compra:", error);
-      showToast("Error al guardar precio: " + error.message, 'error');
-    }
-  };
-
-  // Dividir gastos
-  const splitExpenses = (totalAmount, participants) => {
-    const sharePerPerson = totalAmount / participants.length;
-
-    const result = `Resumen de Gastos\n\n
-    Total gastado: ${totalAmount.toFixed(2)} €\n
-    Número de personas: ${participants.length}\n
-    Precio por persona: ${sharePerPerson.toFixed(2)} €\n\n
-    ${participants.map((p, i) => `${i + 1}. ${p}: ${sharePerPerson.toFixed(2)} €`).join('\n')}`;
-
-    navigator.clipboard.writeText(result);
-    showToast("Resumen copiado al portapapeles", 'success');
-  };
-
-  // Componente separado para el contenido del modal de división de gastos
-  const SplitDialogContent = () => {
-    const [hasCalculated, setHasCalculated] = useState(false);
-
-    const totalPrice = purchaseInfo[currentList]?.totalPrice ||
-      Object.values(itemPrices[currentList] || {}).reduce((sum, price) => sum + price.amount, 0);
-    const participants = [auth.currentUser?.email || "Tú", ...(allLists.find(list => list.id === currentList)?.sharedWith || [])];
-
-    if (!totalPrice || totalPrice === 0) {
-      return (
-        <div className="dialog-content" style={{
-          padding: '24px',
-          flex: 1,
-          overflowY: 'auto',
-          background: 'white'
-        }}>
-          <div style={{ textAlign: 'center', padding: '20px' }}>
-            <div style={{
-              width: '64px',
-              height: '64px',
-              margin: '0 auto 16px',
-              backgroundColor: '#f3f4f6',
-              borderRadius: '50%',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontSize: '24px',
-              color: '#6b7280'
-            }}>
-              💰
-            </div>
-            <p style={{
-              color: '#374151',
-              marginBottom: '8px',
-              fontSize: '16px',
-              fontWeight: '500'
-            }}>
-              Precio total no establecido
-            </p>
-            <p style={{
-              color: '#6b7280',
-              fontSize: '14px',
-              lineHeight: '1.5'
-            }}>
-              Primero establece el precio total de la compra usando 'Finalizar Compra'
-            </p>
-          </div>
-        </div>
-      );
-    }
-
-    const sharePerPerson = totalPrice / participants.length;
-
-    // Mostrar resultados solo si se ha hecho clic en Calcular
-    if (hasCalculated) {
-      return (
-        <>
-          <div className="dialog-content" style={{
-            padding: '24px',
-            flex: 1,
-            overflowY: 'auto',
-            background: 'white'
-          }}>
-            <div className="split-result" style={{
-              backgroundColor: '#f8fafc',
-              padding: '20px',
-              borderRadius: '8px',
-              margin: '16px 0',
-              border: '1px solid #e5e7eb'
-            }}>
-              <div style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '8px',
-                marginBottom: '16px',
-                paddingBottom: '12px',
-                borderBottom: '1px solid #e5e7eb'
-              }}>
-                <div style={{
-                  width: '32px',
-                  height: '32px',
-                  backgroundColor: '#10b981',
-                  borderRadius: '6px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  fontSize: '16px',
-                  color: 'white'
-                }}>
-                  ✓
-                </div>
-                <h4 style={{
-                  margin: 0,
-                  fontSize: '18px',
-                  fontWeight: '600',
-                  color: '#065f46'
-                }}>
-                  Cálculo Completado
-                </h4>
-              </div>
-
-              <div style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
-                gap: '16px',
-                marginBottom: '20px'
-              }}>
-                <div style={{
-                  backgroundColor: 'white',
-                  padding: '12px',
-                  borderRadius: '6px',
-                  border: '1px solid #d1d5db'
-                }}>
-                  <div style={{
-                    fontSize: '12px',
-                    color: '#6b7280',
-                    marginBottom: '4px',
-                    fontWeight: '500'
-                  }}>
-                    TOTAL GASTADO
-                  </div>
-                  <div style={{
-                    fontSize: '20px',
-                    fontWeight: '700',
-                    color: '#1f2937'
-                  }}>
-                    {totalPrice.toFixed(2)} €
-                  </div>
-                </div>
-
-                <div style={{
-                  backgroundColor: 'white',
-                  padding: '12px',
-                  borderRadius: '6px',
-                  border: '1px solid #d1d5db'
-                }}>
-                  <div style={{
-                    fontSize: '12px',
-                    color: '#6b7280',
-                    marginBottom: '4px',
-                    fontWeight: '500'
-                  }}>
-                    PERSONAS
-                  </div>
-                  <div style={{
-                    fontSize: '20px',
-                    fontWeight: '700',
-                    color: '#1f2937'
-                  }}>
-                    {participants.length}
-                  </div>
-                </div>
-
-                <div style={{
-                  backgroundColor: '#10b981',
-                  padding: '12px',
-                  borderRadius: '6px',
-                  border: '1px solid #059669'
-                }}>
-                  <div style={{
-                    fontSize: '12px',
-                    color: 'white',
-                    marginBottom: '4px',
-                    fontWeight: '500',
-                    opacity: 0.9
-                  }}>
-                    POR PERSONA
-                  </div>
-                  <div style={{
-                    fontSize: '20px',
-                    fontWeight: '700',
-                    color: 'white'
-                  }}>
-                    {sharePerPerson.toFixed(2)} €
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div className="dialog-buttons" style={{
-            display: 'flex',
-            gap: '12px',
-            justifyContent: 'flex-end',
-            padding: '0 24px 24px',
-            flexWrap: 'wrap',
-            background: 'white'
-          }}>
-            <button
-              onClick={() => setSplitDialogOpen(false)}
-              className="cancel-btn"
-              style={{
-                backgroundColor: '#f3f4f6',
-                color: '#374151',
-                border: '1px solid #d1d5db',
-                padding: '10px 20px',
-                borderRadius: '8px',
-                cursor: 'pointer',
-                fontWeight: '500',
-                transition: 'all 0.2s',
-                minWidth: '80px'
-              }}
-              onMouseEnter={(e) => {
-                e.target.style.backgroundColor = '#e5e7eb';
-                e.target.style.borderColor = '#9ca3af';
-              }}
-              onMouseLeave={(e) => {
-                e.target.style.backgroundColor = '#f3f4f6';
-                e.target.style.borderColor = '#d1d5db';
-              }}
-            >
-              Cerrar
-            </button>
-            <button
-              onClick={() => {
-                const result = `Resumen de Gastos\n\nTotal gastado: ${totalPrice.toFixed(2)} €\nNúmero de personas: ${participants.length}\nPrecio por persona: ${sharePerPerson.toFixed(2)} €\n\n${participants.map((p, i) => `${i + 1}. ${p}: ${sharePerPerson.toFixed(2)} €`).join('\n')}`;
-                navigator.clipboard.writeText(result);
-                showToast("Resumen copiado al portapapeles", 'success');
-              }}
-              className="blue-button"
-              style={{
-                backgroundColor: '#10b981',
-                color: 'white',
-                border: 'none',
-                padding: '10px 20px',
-                borderRadius: '8px',
-                cursor: 'pointer',
-                fontWeight: '500',
-                transition: 'all 0.2s',
-                minWidth: '100px'
-              }}
-              onMouseEnter={(e) => {
-                e.target.style.backgroundColor = '#059669';
-              }}
-              onMouseLeave={(e) => {
-                e.target.style.backgroundColor = '#10b981';
-              }}
-            >
-              <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                  <path d="M8 16H6C4.89543 16 4 15.1046 4 14V6C4 4.89543 4.89543 4 6 4H14C15.1046 4 16 4.89543 16 6V8M10 20H18C19.1046 20 20 19.1046 20 18V10C20 8.89543 19.1046 8 18 8H10C8.89543 8 8 8.89543 8 10V18C8 19.1046 8.89543 20 10 20Z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
-                Copiar
-              </span>
-            </button>
-          </div>
-        </>
-      );
-    }
-
-    // Estado inicial - mostrar información básica
-    return (
-      <>
-        <div className="dialog-content" style={{
-          padding: '24px',
-          flex: 1,
-          overflowY: 'auto',
-          background: 'white'
-        }}>
-          <div style={{ textAlign: 'center', padding: '20px 0' }}>
-            <div style={{
-              width: '80px',
-              height: '80px',
-              margin: '0 auto 20px',
-              backgroundColor: '#f0f9ff',
-              borderRadius: '50%',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontSize: '32px',
-              color: '#3b82f6'
-            }}>
-              👥
-            </div>
-            <h4 style={{
-              margin: '0 0 12px 0',
-              fontSize: '18px',
-              fontWeight: '600',
-              color: '#1f2937'
-            }}>
-              Dividir Gastos
-            </h4>
-            <p style={{
-              color: '#6b7280',
-              fontSize: '14px',
-              lineHeight: '1.5',
-              marginBottom: '24px'
-            }}>
-              Calcula cómo dividir el total de <strong>{totalPrice.toFixed(2)} €</strong> entre <strong>{participants.length}</strong> persona{participants.length !== 1 ? 's' : ''}
-            </p>
-            <div style={{
-              backgroundColor: '#f8fafc',
-              padding: '16px',
-              borderRadius: '8px',
-              border: '1px solid #e5e7eb'
-            }}>
-              <div style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                marginBottom: '8px'
-              }}>
-                <span style={{ color: '#6b7280', fontSize: '14px' }}>Total disponible:</span>
-                <strong style={{ color: '#1f2937' }}>{totalPrice.toFixed(2)} €</strong>
-              </div>
-              <div style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center'
-              }}>
-                <span style={{ color: '#6b7280', fontSize: '14px' }}>Personas participantes:</span>
-                <strong style={{ color: '#1f2937' }}>{participants.length}</strong>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div className="dialog-buttons" style={{
-          display: 'flex',
-          gap: '12px',
-          justifyContent: 'flex-end',
-          padding: '0 24px 24px',
-          flexWrap: 'wrap',
-          background: 'white'
-        }}>
-          <button
-            onClick={() => setSplitDialogOpen(false)}
-            className="cancel-btn"
-            style={{
-              backgroundColor: '#f3f4f6',
-              color: '#374151',
-              border: '1px solid #d1d5db',
-              padding: '10px 20px',
-              borderRadius: '8px',
-              cursor: 'pointer',
-              fontWeight: '500',
-              transition: 'all 0.2s',
-              minWidth: '80px'
-            }}
-            onMouseEnter={(e) => {
-              e.target.style.backgroundColor = '#e5e7eb';
-              e.target.style.borderColor = '#9ca3af';
-            }}
-            onMouseLeave={(e) => {
-              e.target.style.backgroundColor = '#f3f4f6';
-              e.target.style.borderColor = '#d1d5db';
-            }}
-          >
-            Cerrar
-          </button>
-          <button
-            onClick={() => setHasCalculated(true)}
-            className="blue-button"
-            style={{
-              backgroundColor: '#3b82f6',
-              color: 'white',
-              border: 'none',
-              padding: '10px 20px',
-              borderRadius: '8px',
-              cursor: 'pointer',
-              fontWeight: '500',
-              transition: 'all 0.2s',
-              minWidth: '100px'
-            }}
-            onMouseEnter={(e) => {
-              e.target.style.backgroundColor = '#2563eb';
-            }}
-            onMouseLeave={(e) => {
-              e.target.style.backgroundColor = '#3b82f6';
-            }}
-          >
-            <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <path d="M9 7H5C3.89543 7 3 7.89543 3 9V18C3 19.1046 3.89543 20 5 20H13C14.1046 20 15 19.1046 15 18V14M9 7V5C9 3.89543 9.89543 3 11 3H15.5858C15.851 3 16.1054 3.10536 16.2929 3.29289L20.7071 7.70711C20.8946 7.89464 21 8.149 21 8.41421V13C21 14.1046 20.1046 15 19 15H15M9 7H11C12.1046 7 13 7.89543 13 9V14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-              Calcular
-            </span>
-          </button>
-        </div>
-      </>
-    );
-  };
-
-  // Cargar precios de items
-  const loadItemPrices = async (listId, items) => {
-    try {
-      const prices = {};
-
-      for (const item of items) {
-        if (item.id && !item.id.startsWith('temp-')) {
-          try {
-            const priceDoc = await getDoc(doc(db, "itemPrices", item.id));
-            if (priceDoc.exists()) {
-              const price = priceDoc.data().price;
-              if (price) {
-                prices[item.id] = {
-                  amount: price,
-                  listId: listId
-                };
-              }
-            }
-          } catch (error) {
-            console.log("Error cargando precio para item:", item.id, error);
-          }
-        }
-      }
-
-      setItemPrices(prev => ({
-        ...prev,
-        [listId]: prices
-      }));
-    } catch (error) {
-      console.error("Error cargando precios de items:", error);
-    }
-  };
-
-  // Guardar precio de item individual
-  const saveItemPrice = async (itemId, price, listId) => {
-    try {
-      if (itemId && !itemId.startsWith('temp-')) {
-        await setDoc(doc(db, "itemPrices", itemId), {
-          price: parseFloat(price),
-          updatedAt: new Date(),
-          listId: listId
-        });
-
-        setItemPrices(prev => ({
-          ...prev,
-          [listId]: {
-            ...prev[listId],
-            [itemId]: {
-              amount: parseFloat(price),
-              listId: listId
-            }
-          }
-        }));
-
-        updateTotalPrice(listId);
-        showToast(`Precio guardado: ${price}€`, 'success');
-      }
-    } catch (error) {
-      console.error("Error guardando precio de item:", error);
-      showToast("Error al guardar precio: " + error.message, 'error');
-    }
-  };
-
-  // Actualizar precio total automáticamente
-  const updateTotalPrice = async (listId) => {
-    try {
-      const currentItemPrices = itemPrices[listId] || {};
-      const totalPrice = Object.values(currentItemPrices).reduce((sum, price) => sum + price.amount, 0);
-
-      const purchaseInfoData = {
-        totalPrice: totalPrice,
-        finalizedAt: new Date(),
-        finalizedBy: auth.currentUser?.email || "",
-        autoCalculated: true,
-        itemPrices: currentItemPrices
-      };
-
-      await updateDoc(doc(db, "lists", listId), {
-        purchaseInfo: purchaseInfoData
-      });
-
-      setPurchaseInfo(prev => ({
-        ...prev,
-        [listId]: purchaseInfoData
-      }));
-    } catch (error) {
-      console.error("Error actualizando precio total:", error);
-    }
-  };
-
-  // Efectos
-  useEffect(() => {
-    if (currentList) {
-      loadListObservations(currentList);
-      loadPurchaseInfo(currentList);
-    }
-  }, [currentList]);
-
-  useEffect(() => {
-    if (currentList && items.length > 0) {
-      loadItemPrices(currentList, items);
-    }
-  }, [currentList, items]);
-
-  useEffect(() => {
-    const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
-      if (user) {
-        setUserReady(true);
-        loadInitialData(user);
-      } else {
-        setUserReady(false);
-        resetState();
-      }
-    });
-
-    return () => unsubscribeAuth();
-  }, []);
-
-  const resetState = () => {
-    setItems([]);
-    setLists([]);
-    setSharedLists([]);
-    setCurrentList("");
-    itemsCache.current = {};
-    listsCache.current = { userLists: [], sharedLists: [] };
-  };
-
-  const loadInitialData = async (user) => {
-    try {
-      setLoading(true);
-
-      if (!listsCache.current.userLists.length) {
-        listsCache.current.userLists = [];
-      }
-      if (!listsCache.current.sharedLists.length) {
-        listsCache.current.sharedLists = [];
-      }
-
-      const [userUnsubscribe, sharedUnsubscribe] = await Promise.all([
-        loadUserLists(user),
-        loadSharedLists(user)
-      ]);
-
-      const allLists = [
-        ...listsCache.current.userLists,
-        ...listsCache.current.sharedLists
-      ];
-
-      // Si no hay lista actual pero hay listas disponibles, seleccionar la primera
-      if (allLists.length > 0 && !currentList) {
-        setCurrentList(allLists[0].id);
-      }
-
-      return () => {
-        userUnsubscribe();
-        sharedUnsubscribe();
-      };
-    } catch (err) {
-      console.error("Error loading initial data:", err);
-      setError(`Error loading data: ${err.message}`);
-      showToast(`Error cargando datos: ${err.message}`, 'error');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const loadUserLists = async (user) => {
-    const userListsQuery = query(
-      collection(db, "lists"),
-      where("userId", "==", user.uid)
-    );
-
-    const unsubscribe = onSnapshot(userListsQuery, (snapshot) => {
-      const userLists = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      listsCache.current.userLists = userLists;
-      setLists(userLists);
-
-      // Si la lista actual fue eliminada y hay listas propias, seleccionar la primera
-      if (currentList && !userLists.some(list => list.id === currentList) && userLists.length > 0) {
-        setCurrentList(userLists[0].id);
-      }
-      // Si no hay lista actual pero hay listas propias, seleccionar la primera
-      else if (!currentList && userLists.length > 0) {
-        setCurrentList(userLists[0].id);
-      }
-    });
-
-    return unsubscribe;
-  };
-
-  const loadSharedLists = async (user) => {
-    const sharedListsQuery = query(
-      collection(db, "lists"),
-      where("sharedWith", "array-contains", user.email)
-    );
-
-    const unsubscribe = onSnapshot(sharedListsQuery, (snapshot) => {
-      const sharedListsData = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data(),
-        ownerEmail: doc.data().ownerEmail || ""
-      }));
-
-      listsCache.current.sharedLists = sharedListsData;
-      setSharedLists(sharedListsData);
-
-      // Si la lista actual fue eliminada y no hay listas propias, limpiar currentList
-      if (currentList && !sharedListsData.some(list => list.id === currentList) && lists.length === 0) {
-        setCurrentList("");
-      }
-    });
-
-    return unsubscribe;
-  };
-
-  // Efecto para items - CORREGIDO Y MEJORADO
-  useEffect(() => {
-    if (!currentList) {
-      setItems([]);
-      return;
-    }
-
-    console.log("Suscribiéndose a items para lista:", currentList);
-
-    const q = query(
-      collection(db, "items"),
-      where("listId", "==", currentList)
-    );
-
-    const unsubscribe = onSnapshot(q,
-      (snapshot) => {
-        console.log("Nuevos datos recibidos:", snapshot.docs.length, "items");
-
-        const updatedItems = snapshot.docs.map(doc => {
-          const data = doc.data();
-          console.log("Procesando item:", doc.id, data);
-
-          // Asegurar que todos los campos necesarios existen
-          const categoryInfo = getCategoryInfo(data.category || "OTHER");
-
-          return {
-            id: doc.id,
-            text: data.text || "",
-            listId: data.listId || currentList,
-            userId: data.userId || "",
-            addedBy: data.addedBy || "",
-            completed: data.completed || false,
-            purchasedBy: data.purchasedBy || "",
-            purchasedAt: data.purchasedAt || null,
-            category: data.category || "OTHER",
-            createdAt: data.createdAt || new Date(),
-            categoryColor: categoryInfo.color,
-            categoryIcon: categoryInfo.icon,
-            isOptimistic: false
-          };
-        });
-
-        // Combinar con items optimistas
-        const optimisticItems = items.filter(item =>
-          item.isOptimistic && item.listId === currentList
-        );
-        const combinedItems = [...optimisticItems, ...updatedItems];
-
-        console.log("Items combinados:", combinedItems.length);
-
-        setItems(combinedItems);
-      },
-      (error) => {
-        console.error("Error en listener de items:", error);
-        setError(`Error al cargar productos: ${error.message}`);
-        showToast(`Error al cargar productos: ${error.message}`, 'error');
-      }
-    );
-
-    return unsubscribe;
-  }, [currentList]);
-
-  // Función elegante para crear lista - CORREGIDA
-  const handleCreateList = async (listName) => {
-    try {
-      if (!listName.trim()) return;
-
-      await createElegantList(listName);
-      // El input se limpia en el componente ElegantListCreator después del éxito
-    } catch (err) {
-      console.error("Error creando lista:", err);
-      setError(`Error al crear lista: ${err.message}`);
-      showToast(`Error al crear lista: ${err.message}`, 'error');
-    }
-  };
-
-  // Función elegante para añadir item - CORREGIDA
-  const handleAddItem = async (itemText) => {
-    try {
-      if (!itemText.trim()) return;
-
-      await addElegantItem(itemText);
-      // El input se limpia en el componente ElegantItemAdder después del éxito
-    } catch (err) {
-      console.error("Error añadiendo producto:", err);
-      setError(`Error al añadir producto: ${err.message}`);
-      showToast(`Error al añadir producto: ${err.message}`, 'error');
-    }
-  };
-
+  // Eliminar un producto de la lista
   const deleteItem = async (id) => {
     try {
       setLoading(true);
@@ -1193,8 +450,6 @@ export function ShoppingList() {
         throw new Error("Producto no encontrado");
       }
 
-      console.log("Eliminando item:", id, "de la lista:", currentList);
-
       // Actualización optimista - eliminar inmediatamente del estado local
       setItems(prev => prev.filter(item => item.id !== id));
       setConfirmDelete(null);
@@ -1207,46 +462,16 @@ export function ShoppingList() {
           const docSnap = await getDoc(itemRef);
 
           if (docSnap.exists()) {
-            console.log("Eliminando item de Firebase:", id);
             await deleteDoc(itemRef);
-            console.log("Item eliminado exitosamente de Firebase");
-
-            // Intentar eliminar el precio asociado si existe
-            try {
-              const priceRef = doc(db, "itemPrices", id);
-              const priceSnap = await getDoc(priceRef);
-              if (priceSnap.exists()) {
-                await deleteDoc(priceRef);
-                console.log("Precio eliminado exitosamente");
-
-                // Actualizar el estado local de precios
-                setItemPrices(prev => {
-                  const updatedPrices = { ...prev };
-                  if (updatedPrices[currentList]) {
-                    delete updatedPrices[currentList][id];
-                  }
-                  return updatedPrices;
-                });
-              }
-            } catch (priceError) {
-              console.log("No se encontró precio para eliminar o error al eliminar:", priceError);
-            }
-          } else {
-            console.log("El item ya no existe en Firebase, solo se eliminó localmente");
           }
         } catch (firestoreError) {
-          console.error("Error al eliminar de Firebase:", firestoreError);
           throw new Error(`Error al eliminar de la base de datos: ${firestoreError.message}`);
         }
-      } else {
-        console.log("Eliminando item temporal, solo actualización local");
       }
 
       showToast('Producto eliminado', 'success');
 
     } catch (err) {
-      console.error("Error borrando producto:", err);
-
       // Revertir en caso de error - buscar el item original
       const originalItem = confirmDelete || items.find(item => item.id === id);
       if (originalItem) {
@@ -1259,6 +484,7 @@ export function ShoppingList() {
     }
   };
 
+  // Eliminar una lista completa y todos sus productos
   const deleteList = async (listId) => {
     if (!auth.currentUser?.uid) return;
 
@@ -1276,10 +502,9 @@ export function ShoppingList() {
 
       itemsSnapshot.forEach((itemDoc) => {
         batch.delete(doc(db, "items", itemDoc.id));
-        batch.delete(doc(db, "itemPrices", itemDoc.id));
       });
 
-      // ELIMINAR OBSERVACIONES DE LA LISTA - NUEVO
+      // Eliminar observaciones de la lista
       batch.delete(doc(db, "listObservations", listId));
 
       // Eliminar la lista
@@ -1304,7 +529,6 @@ export function ShoppingList() {
       showToast("Lista eliminada exitosamente", 'success');
 
     } catch (err) {
-      console.error("Error eliminando lista:", err);
       setError(`Error al eliminar: ${err.message}`);
       showToast(`Error al eliminar: ${err.message}`, 'error');
 
@@ -1315,120 +539,7 @@ export function ShoppingList() {
     }
   };
 
-  const openShareDialog = () => {
-    if (!currentList) return;
-
-    const currentListData = [...lists, ...sharedLists].find(list => list.id === currentList);
-    setSharedUsers(currentListData?.sharedWith || []);
-    setShareDialogOpen(true);
-  };
-
-  const unshareList = async () => {
-    if (!currentList || !userToUnshare) return;
-
-    try {
-      const tempSharedUsers = sharedUsers.filter(email => email !== userToUnshare);
-      setSharedUsers(tempSharedUsers);
-
-      setLists(prev => prev.map(list =>
-        list.id === currentList
-          ? { ...list, sharedWith: tempSharedUsers }
-          : list
-      ));
-
-      await updateDoc(doc(db, "lists", currentList), {
-        sharedWith: arrayRemove(userToUnshare)
-      });
-
-      const batch = writeBatch(db);
-      const itemsQuery = query(
-        collection(db, "items"),
-        where("listId", "==", currentList),
-        where("userId", "==", userToUnshare)
-      );
-
-      const querySnapshot = await getDocs(itemsQuery);
-      querySnapshot.forEach((doc) => {
-        batch.delete(doc.ref);
-      });
-
-      await batch.commit();
-
-      setUnshareDialogOpen(false);
-      setUserToUnshare("");
-      showToast(`Lista dejada de compartir con ${userToUnshare}`, 'success');
-    } catch (err) {
-      console.error("Error eliminando compartido:", err);
-      setSharedUsers([...sharedUsers, userToUnshare]);
-      setError(`Error al eliminar compartido: ${err.message}`);
-      showToast(`Error al eliminar compartido: ${err.message}`, 'error');
-    }
-  };
-
-  const getCurrentListName = () => {
-    const list = allLists.find(list => list.id === currentList);
-    if (!list) return "";
-
-    if (sharedLists.some(sharedList => sharedList.id === currentList)) {
-      return `${list.name} (de ${list.ownerEmail?.split('@')[0] || 'Usuario'})`;
-    }
-
-    return list.name;
-  };
-
-  // Verificar si el usuario actual es el propietario de la lista actual
-  const isCurrentListOwned = () => {
-    return lists.some(list => list.id === currentList);
-  };
-
-  // Verificar si la lista actual es compartida con el usuario
-  const isCurrentListShared = () => {
-    return sharedLists.some(list => list.id === currentList);
-  };
-
-  // Verificar si el usuario actual tiene acceso a la lista (propietario o compartida)
-  const userHasAccessToList = (listId) => {
-    return allLists.some(list => list.id === listId);
-  };
-
-  const isListSharedByMe = (list) => {
-    return list.sharedWith && list.sharedWith.length > 0;
-  };
-
-  const sortedItems = [...items].sort((a, b) => {
-    if (a.completed !== b.completed) {
-      return a.completed ? 1 : -1;
-    }
-    if (a.category !== b.category) {
-      return (a.category || "OTHER").localeCompare(b.category || "OTHER");
-    }
-    return a.text.localeCompare(b.text);
-  });
-
-  const checkUserExists = async (email) => {
-    try {
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-      if (!emailRegex.test(email)) {
-        return false;
-      }
-      return true;
-    } catch (error) {
-      console.error("Error en verificación:", error);
-      return true;
-    }
-  };
-
-  const isCurrentListSharedByMe = () => {
-    const currentListData = lists.find(list => list.id === currentList);
-    return currentListData && currentListData.sharedWith && currentListData.sharedWith.length > 0;
-  };
-
-  const isValidEmail = (email) => {
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    return emailRegex.test(email);
-  };
-
+  // Compartir lista con otro usuario
   const shareList = async () => {
     if (!currentList || !emailToShare.trim() || !auth.currentUser?.uid) return;
 
@@ -1488,7 +599,6 @@ export function ShoppingList() {
       }, 3000);
 
     } catch (err) {
-      console.error("Error compartiendo lista:", err);
       setSharedUsers(sharedUsers.filter(email => email !== emailToShare.trim().toLowerCase()));
       setEmailValidation({
         valid: false,
@@ -1500,22 +610,386 @@ export function ShoppingList() {
     }
   };
 
+  // Dejar de compartir lista con un usuario
+  const unshareList = async () => {
+    if (!currentList || !userToUnshare) return;
+
+    try {
+      const tempSharedUsers = sharedUsers.filter(email => email !== userToUnshare);
+      setSharedUsers(tempSharedUsers);
+
+      setLists(prev => prev.map(list =>
+        list.id === currentList
+          ? { ...list, sharedWith: tempSharedUsers }
+          : list
+      ));
+
+      await updateDoc(doc(db, "lists", currentList), {
+        sharedWith: arrayRemove(userToUnshare)
+      });
+
+      const batch = writeBatch(db);
+      const itemsQuery = query(
+        collection(db, "items"),
+        where("listId", "==", currentList),
+        where("userId", "==", userToUnshare)
+      );
+
+      const querySnapshot = await getDocs(itemsQuery);
+      querySnapshot.forEach((doc) => {
+        batch.delete(doc.ref);
+      });
+
+      await batch.commit();
+
+      setUnshareDialogOpen(false);
+      setUserToUnshare("");
+      showToast(`Lista dejada de compartir con ${userToUnshare}`, 'success');
+    } catch (err) {
+      setSharedUsers([...sharedUsers, userToUnshare]);
+      setError(`Error al eliminar compartido: ${err.message}`);
+      showToast(`Error al eliminar compartido: ${err.message}`, 'error');
+    }
+  };
+
+  // Efectos para carga de datos
+  useEffect(() => {
+    if (currentList) {
+      loadListObservations(currentList);
+      loadPurchaseInfo(currentList);
+    }
+  }, [currentList]);
+
+  useEffect(() => {
+    const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
+      if (user) {
+        setUserReady(true);
+        loadInitialData(user);
+      } else {
+        setUserReady(false);
+        resetState();
+      }
+    });
+
+    return () => unsubscribeAuth();
+  }, []);
+
+  // Resetear estado cuando el usuario cierra sesión
+  const resetState = () => {
+    setItems([]);
+    setLists([]);
+    setSharedLists([]);
+    setCurrentList("");
+    itemsCache.current = {};
+    listsCache.current = { userLists: [], sharedLists: [] };
+  };
+
+  // Función para cargar información de compra
+  const loadPurchaseInfo = async (listId) => {
+    try {
+      const listDoc = await getDoc(doc(db, "lists", listId));
+      if (listDoc.exists()) {
+        const data = listDoc.data();
+        setPurchaseInfo(prev => ({
+          ...prev,
+          [listId]: data.purchaseInfo || null
+        }));
+      }
+    } catch (error) {
+      console.error("Error cargando información de compra:", error);
+    }
+  };
+
+  // Función para finalizar compra - guardar precio total
+  const finalizePurchase = async (listId, totalPrice) => {
+    try {
+      if (totalPrice !== null) {
+        const purchaseInfoData = {
+          totalPrice: parseFloat(totalPrice),
+          finalizedAt: new Date(),
+          finalizedBy: auth.currentUser?.email || "",
+          autoCalculated: false
+        };
+
+        await updateDoc(doc(db, "lists", listId), {
+          purchaseInfo: purchaseInfoData
+        });
+
+        setPurchaseInfo(prev => ({
+          ...prev,
+          [listId]: purchaseInfoData
+        }));
+
+        showToast(`Precio guardado: ${totalPrice} €`, 'success');
+      } else {
+        await updateDoc(doc(db, "lists", listId), {
+          purchaseInfo: null
+        });
+
+        setPurchaseInfo(prev => ({
+          ...prev,
+          [listId]: null
+        }));
+
+        showToast("Precio eliminado", 'info');
+      }
+    } catch (error) {
+      console.error("Error finalizando compra:", error);
+      showToast("Error al guardar precio: " + error.message, 'error');
+    }
+  };
+
+  // Cargar datos iniciales del usuario
+  const loadInitialData = async (user) => {
+    try {
+      setLoading(true);
+
+      if (!listsCache.current.userLists.length) {
+        listsCache.current.userLists = [];
+      }
+      if (!listsCache.current.sharedLists.length) {
+        listsCache.current.sharedLists = [];
+      }
+
+      const [userUnsubscribe, sharedUnsubscribe] = await Promise.all([
+        loadUserLists(user),
+        loadSharedLists(user)
+      ]);
+
+      const allLists = [
+        ...listsCache.current.userLists,
+        ...listsCache.current.sharedLists
+      ];
+
+      // Si no hay lista actual pero hay listas disponibles, seleccionar la primera
+      if (allLists.length > 0 && !currentList) {
+        setCurrentList(allLists[0].id);
+      }
+
+      return () => {
+        userUnsubscribe();
+        sharedUnsubscribe();
+      };
+    } catch (err) {
+      setError(`Error loading data: ${err.message}`);
+      showToast(`Error cargando datos: ${err.message}`, 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Cargar listas del usuario desde Firebase
+  const loadUserLists = async (user) => {
+    const userListsQuery = query(
+      collection(db, "lists"),
+      where("userId", "==", user.uid)
+    );
+
+    const unsubscribe = onSnapshot(userListsQuery, (snapshot) => {
+      const userLists = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      listsCache.current.userLists = userLists;
+      setLists(userLists);
+
+      // Si la lista actual fue eliminada y hay listas propias, seleccionar la primera
+      if (currentList && !userLists.some(list => list.id === currentList) && userLists.length > 0) {
+        setCurrentList(userLists[0].id);
+      }
+      // Si no hay lista actual pero hay listas propias, seleccionar la primera
+      else if (!currentList && userLists.length > 0) {
+        setCurrentList(userLists[0].id);
+      }
+    });
+
+    return unsubscribe;
+  };
+
+  // Cargar listas compartidas con el usuario desde Firebase
+  const loadSharedLists = async (user) => {
+    const sharedListsQuery = query(
+      collection(db, "lists"),
+      where("sharedWith", "array-contains", user.email)
+    );
+
+    const unsubscribe = onSnapshot(sharedListsQuery, (snapshot) => {
+      const sharedListsData = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data(),
+        ownerEmail: doc.data().ownerEmail || ""
+      }));
+
+      listsCache.current.sharedLists = sharedListsData;
+      setSharedLists(sharedListsData);
+
+      // Si la lista actual fue eliminada y no hay listas propias, limpiar currentList
+      if (currentList && !sharedListsData.some(list => list.id === currentList) && lists.length === 0) {
+        setCurrentList("");
+      }
+    });
+
+    return unsubscribe;
+  };
+
+  // Efecto para cargar items de la lista actual
+  useEffect(() => {
+    if (!currentList) {
+      setItems([]);
+      return;
+    }
+
+    const q = query(
+      collection(db, "items"),
+      where("listId", "==", currentList)
+    );
+
+    const unsubscribe = onSnapshot(q,
+      (snapshot) => {
+        const updatedItems = snapshot.docs.map(doc => {
+          const data = doc.data();
+
+          // Asegurar que todos los campos necesarios existen
+          const categoryInfo = getCategoryInfo(data.category || "OTHER");
+
+          return {
+            id: doc.id,
+            text: data.text || "",
+            listId: data.listId || currentList,
+            userId: data.userId || "",
+            addedBy: data.addedBy || "",
+            completed: data.completed || false,
+            purchasedBy: data.purchasedBy || "",
+            purchasedAt: data.purchasedAt || null,
+            category: data.category || "OTHER",
+            createdAt: data.createdAt || new Date(),
+            categoryColor: categoryInfo.color,
+            categoryIcon: categoryInfo.icon,
+            isOptimistic: false
+          };
+        });
+
+        // Combinar con items optimistas
+        const optimisticItems = items.filter(item =>
+          item.isOptimistic && item.listId === currentList
+        );
+        const combinedItems = [...optimisticItems, ...updatedItems];
+        setItems(combinedItems);
+      },
+      (error) => {
+        setError(`Error al cargar productos: ${error.message}`);
+        showToast(`Error al cargar productos: ${error.message}`, 'error');
+      }
+    );
+
+    return unsubscribe;
+  }, [currentList]);
+
+  // Función para crear lista - wrapper
+  const handleCreateList = async (listName) => {
+    try {
+      if (!listName.trim()) return;
+
+      await createElegantList(listName);
+    } catch (err) {
+      setError(`Error al crear lista: ${err.message}`);
+      showToast(`Error al crear lista: ${err.message}`, 'error');
+    }
+  };
+
+  // Función para añadir item - wrapper
+  const handleAddItem = async (itemText) => {
+    try {
+      if (!itemText.trim()) return;
+
+      await addElegantItem(itemText);
+    } catch (err) {
+      setError(`Error al añadir producto: ${err.message}`);
+      showToast(`Error al añadir producto: ${err.message}`, 'error');
+    }
+  };
+
+  // Funciones auxiliares
+  const allLists = [...lists, ...sharedLists];
+
+  const getCurrentListName = () => {
+    const list = allLists.find(list => list.id === currentList);
+    if (!list) return "";
+
+    if (sharedLists.some(sharedList => sharedList.id === currentList)) {
+      return `${list.name} (de ${list.ownerEmail?.split('@')[0] || 'Usuario'})`;
+    }
+
+    return list.name;
+  };
+
+  // Verificar si el usuario actual es el propietario de la lista actual
+  const isCurrentListOwned = () => {
+    return lists.some(list => list.id === currentList);
+  };
+
+  // Función para verificar si el usuario actual puede modificar la lista
+  const canUserModifyList = () => {
+    if (!currentList) return false;
+
+    // El dueño siempre puede modificar
+    if (isCurrentListOwned()) return true;
+
+    // Los usuarios con listas compartidas pueden modificar
+    if (isCurrentListShared()) return true;
+
+    return false;
+  };
+
+  // Verificar si la lista actual es compartida con el usuario
+  const isCurrentListShared = () => {
+    return sharedLists.some(list => list.id === currentList);
+  };
+
+  const isCurrentListSharedByMe = () => {
+    const currentListData = lists.find(list => list.id === currentList);
+    return currentListData && currentListData.sharedWith && currentListData.sharedWith.length > 0;
+  };
+
+  const isValidEmail = (email) => {
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    return emailRegex.test(email);
+  };
+
+  const checkUserExists = async (email) => {
+    try {
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(email)) {
+        return false;
+      }
+      return true;
+    } catch (error) {
+      return true;
+    }
+  };
+
+  // Ordenar items: pendientes primero, luego por categoría y texto
+  const sortedItems = [...items].sort((a, b) => {
+    if (a.completed !== b.completed) {
+      return a.completed ? 1 : -1;
+    }
+    if (a.category !== b.category) {
+      return (a.category || "OTHER").localeCompare(b.category || "OTHER");
+    }
+    return a.text.localeCompare(b.text);
+  });
+
+
   // Componente para la sección de información de la lista
   const ListInfoSection = () => {
     if (!currentList) return null;
 
-    const currentPurchaseInfo = purchaseInfo[currentList];
     const currentObservations = listObservations[currentList] || "";
-    const currentListData = allLists.find(list => list.id === currentList);
-    const currentItemPrices = itemPrices[currentList] || {};
-
-    const autoCalculatedTotal = Object.values(currentItemPrices).reduce((sum, price) => sum + price.amount, 0);
-    const effectiveTotalPrice = currentPurchaseInfo?.totalPrice || autoCalculatedTotal;
+    const currentPurchaseInfo = purchaseInfo[currentList];
+    const isSharedList = isCurrentListShared() || isCurrentListSharedByMe();
 
     return (
       <div className="list-info-section" style={{ marginBottom: "3%" }}>
         <div className="list-info-header">
-          <h4>Información de la Lista</h4>
+          <h4 style={{ color: "black" }}>Información de la Lista</h4>
           <div className="list-info-actions">
             <button
               onClick={() => setObservationsDialogOpen(true)}
@@ -1529,8 +1003,27 @@ export function ShoppingList() {
                 cursor: "pointer"
               }}
             >
-              📝
+              <FileText size={24} /> {/* más grande */}
             </button>
+
+            {/* Botón de Dividir Gastos - solo visible en listas compartidas */}
+            {isSharedList && (
+              <button
+                onClick={() => setSplitDialogOpen(true)}
+                className="action-btn"
+                title="Dividir Gastos"
+                style={{
+                  padding: "8px",
+                  borderRadius: "8px",
+                  border: "1px solid #e2e8f0",
+                  background: "white",
+                  cursor: "pointer"
+                }}
+              >
+                <Users size={24} />
+              </button>
+            )}
+
             <button
               onClick={() => setFinalizeDialogOpen(true)}
               className="action-btn"
@@ -1543,29 +1036,29 @@ export function ShoppingList() {
                 cursor: "pointer"
               }}
             >
-              💰
-            </button>
-            <button
-              onClick={() => setSplitDialogOpen(true)}
-              className="action-btn"
-              title="Dividir Gastos"
-              style={{
-                padding: "8px",
-                borderRadius: "8px",
-                border: "1px solid #e2e8f0",
-                background: "white",
-                cursor: "pointer"
-              }}
-            >
-              👥
+              <ShoppingCart size={24} />
             </button>
           </div>
         </div>
 
+        {/* Muestra el precio total si existe */}
+        {currentPurchaseInfo?.totalPrice && (
+          <div className="total-price-info" style={{ marginBottom: "12px" }}>
+            <strong style={{ color: "black" }}>Precio total: </strong>
+            <span style={{
+              color: "#10B981",
+              fontWeight: "bold",
+              fontSize: "16px"
+            }}>
+              {currentPurchaseInfo.totalPrice.toFixed(2)} €
+            </span>
+          </div>
+        )}
+
         {currentObservations && (
           <div className="observations-preview">
-            <strong>Observaciones:</strong>
-            <p>{currentObservations.length > 100
+            <strong style={{ color: "black" }}>Observaciones:</strong>
+            <p style={{ color: "black" }}>{currentObservations.length > 100
               ? currentObservations.substring(0, 100) + "..."
               : currentObservations}</p>
           </div>
@@ -1574,7 +1067,7 @@ export function ShoppingList() {
     );
   };
 
-  // Agrupar items por categoría para mostrar
+  // Agrupar items por categoría para mostrar organizadamente
   const groupItemsByCategory = (itemsList) => {
     const grouped = {};
 
@@ -1593,17 +1086,14 @@ export function ShoppingList() {
   const completedItems = sortedItems.filter(item => item.completed);
   const groupedPendingItems = groupItemsByCategory(pendingItems);
 
-  // Componente elegante para renderizar items
+
+
+  // Componente elegante para renderizar items individuales
   const ElegantItem = ({ item }) => {
     const isSharedList = isCurrentListShared();
-    const currentUserEmail = auth.currentUser?.email;
-    const itemPrice = itemPrices[currentList]?.[item.id]?.amount;
 
     // Calcular categoryInfo dinámicamente basado en la categoría del item
     const categoryInfo = getCategoryInfo(item.category || "OTHER");
-
-    // Verificar si el usuario actual tiene acceso a la lista
-    const userHasAccess = currentList && allLists.some(list => list.id === currentList);
 
     return (
       <li className="elegant-item" style={{
@@ -1693,19 +1183,6 @@ export function ShoppingList() {
         </div>
 
         <div className="item-actions" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          {itemPrice && (
-            <span className="item-price" style={{
-              backgroundColor: '#10B981',
-              color: 'white',
-              padding: '4px 8px',
-              borderRadius: '6px',
-              fontSize: '14px',
-              fontWeight: '600'
-            }}>
-              {itemPrice.toFixed(2)}€
-            </span>
-          )}
-
           {/* PERMITIR ELIMINAR ITEMS A TODOS LOS USUARIOS CON ACCESO A LA LISTA */}
           {currentList && ( // Solo mostrar si hay una lista seleccionada
             <button
@@ -1748,7 +1225,7 @@ export function ShoppingList() {
     );
   };
 
-  // Componente elegante para crear listas - CORREGIDO
+  // Componente para crear listas
   const ElegantListCreator = () => {
     const [localListName, setLocalListName] = useState("");
 
@@ -1760,7 +1237,6 @@ export function ShoppingList() {
         setLocalListName(""); // Limpiar solo si fue exitoso
       } catch (error) {
         // El error ya se maneja en handleCreateList
-        console.error("Error en creación de lista:", error);
       }
     };
 
@@ -1777,9 +1253,8 @@ export function ShoppingList() {
         gap: '12px',
         marginBottom: '24px',
         padding: '16px',
-        backgroundColor: '#F8FAFC',
+        backgroundColor: '#F0F9FF',
         borderRadius: '12px',
-        border: '1px solid #E2E8F0',
         alignItems: 'stretch',
         flexWrap: 'wrap'
       }}>
@@ -1847,27 +1322,41 @@ export function ShoppingList() {
     );
   };
 
-  // Componente elegante para añadir items - COMPLETAMENTE RESPONSIVE
+  // Componente elegante para añadir items
   const ElegantItemAdder = () => {
     const [localItem, setLocalItem] = useState("");
 
+    // Verificar si el usuario puede añadir productos
+    const canAddItems = () => {
+      if (!currentList) return false;
+
+      // Si es dueño de la lista, siempre puede añadir
+      if (isCurrentListOwned()) return true;
+
+      // Si es una lista compartida con él, puede añadir
+      if (isCurrentListShared()) return true;
+
+      return false;
+    };
+
     const handleAdd = async () => {
-      if (!localItem.trim()) return;
+      if (!localItem.trim() || !canAddItems()) return;
 
       try {
         await handleAddItem(localItem);
-        setLocalItem(""); // Limpiar solo si fue exitoso
+        setLocalItem("");
       } catch (error) {
         // El error ya se maneja en handleAddItem
-        console.error("Error en añadir item:", error);
       }
     };
 
     const handleKeyPress = (e) => {
-      if (e.key === 'Enter') {
+      if (e.key === 'Enter' && canAddItems()) {
         handleAdd();
       }
     };
+
+    const canAdd = canAddItems();
 
     return (
       <div className="elegant-item-adder" style={{
@@ -1882,38 +1371,40 @@ export function ShoppingList() {
           value={localItem}
           onChange={(e) => setLocalItem(e.target.value)}
           onKeyPress={handleKeyPress}
-          placeholder="Añadir nuevo producto..."
+          placeholder={canAdd ? "Añadir nuevo producto..." : "No tienes permisos para añadir productos"}
           className="elegant-input"
           style={{
             flex: '1 1 200px',
             minWidth: '0',
             padding: '12px 16px',
-            border: '1px solid #D1D5DB',
+            border: `1px solid ${canAdd ? '#D1D5DB' : '#FECACA'}`,
             borderRadius: '8px',
             fontSize: '16px',
-            color: '#1F2937',
-            backgroundColor: 'white',
+            color: canAdd ? '#1F2937' : '#6B7280',
+            backgroundColor: canAdd ? 'white' : '#FEF2F2',
             outline: 'none',
             transition: 'all 0.2s',
-            boxSizing: 'border-box'
+            boxSizing: 'border-box',
+            cursor: canAdd ? 'text' : 'not-allowed'
           }}
-          onFocus={(e) => e.target.style.borderColor = '#3B82F6'}
-          onBlur={(e) => e.target.style.borderColor = '#D1D5DB'}
+          onFocus={(e) => canAdd && (e.target.style.borderColor = '#3B82F6')}
+          onBlur={(e) => canAdd && (e.target.style.borderColor = '#D1D5DB')}
+          disabled={!canAdd}
         />
         <button
           onClick={handleAdd}
-          disabled={!localItem.trim()}
+          disabled={!localItem.trim() || !canAdd}
           className="elegant-add-btn"
           style={{
             flex: '0 0 auto',
             padding: '12px 20px',
             border: 'none',
             borderRadius: '8px',
-            backgroundColor: !localItem.trim() ? '#9CA3AF' : '#10B981',
+            backgroundColor: !localItem.trim() || !canAdd ? '#9CA3AF' : '#10B981',
             color: 'white',
             fontSize: '16px',
             fontWeight: '600',
-            cursor: !localItem.trim() ? 'not-allowed' : 'pointer',
+            cursor: !localItem.trim() || !canAdd ? 'not-allowed' : 'pointer',
             transition: 'all 0.2s',
             display: 'flex',
             alignItems: 'center',
@@ -1923,15 +1414,16 @@ export function ShoppingList() {
             boxSizing: 'border-box'
           }}
           onMouseEnter={(e) => {
-            if (localItem.trim()) {
+            if (localItem.trim() && canAdd) {
               e.target.style.backgroundColor = '#059669';
             }
           }}
           onMouseLeave={(e) => {
-            if (localItem.trim()) {
+            if (localItem.trim() && canAdd) {
               e.target.style.backgroundColor = '#10B981';
             }
           }}
+          title={!canAdd ? "No tienes permisos para añadir productos a esta lista" : "Añadir producto"}
         >
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
             <path d="M12 4V20M4 12H20" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
@@ -1942,6 +1434,264 @@ export function ShoppingList() {
     );
   };
 
+  // Componente para el contenido del diálogo de división de gastos
+  const SplitDialogContent = () => {
+    // Verificar si es una lista compartida
+    const isSharedList = isCurrentListShared() || isCurrentListSharedByMe();
+
+    if (!isSharedList) {
+      return (
+        <div className="dialog-content" style={{
+          padding: '24px',
+          flex: 1,
+          overflowY: 'auto',
+          background: 'white'
+        }}>
+          <div style={{ textAlign: 'center', padding: '20px' }}>
+            <div style={{
+              width: '64px',
+              height: '64px',
+              margin: '0 auto 16px',
+              backgroundColor: '#f3f4f6',
+              borderRadius: '50%',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontSize: '24px',
+              color: '#6b7280'
+            }}>
+              👥
+            </div>
+            <p style={{
+              color: '#374151',
+              marginBottom: '8px',
+              fontSize: '16px',
+              fontWeight: '500'
+            }}>
+              Solo disponible para listas compartidas
+            </p>
+            <p style={{
+              color: '#6b7280',
+              fontSize: '14px',
+              lineHeight: '1.5'
+            }}>
+              Esta función está disponible solo para listas que has compartido o que han sido compartidas contigo.
+            </p>
+          </div>
+        </div>
+      );
+    }
+
+    const currentPurchaseInfo = purchaseInfo[currentList];
+    const totalPrice = currentPurchaseInfo?.totalPrice;
+
+    // Obtener participantes: propietario + usuarios compartidos
+    const currentListData = allLists.find(list => list.id === currentList);
+    const participants = [
+      currentListData?.ownerEmail || auth.currentUser?.email || "Tú",
+      ...(currentListData?.sharedWith || [])
+    ];
+
+    // Calcular precio por persona
+    const sharePerPerson = totalPrice ? totalPrice / participants.length : 0;
+
+    return (
+      <div className="dialog-content" style={{
+        padding: '24px',
+        flex: 1,
+        overflowY: 'auto',
+        background: 'white'
+      }}>
+        <div style={{ marginBottom: '20px' }}>
+          <h4 style={{
+            color: '#1f2937',
+            marginBottom: '16px',
+            fontSize: '18px',
+            fontWeight: '600'
+          }}>
+          </h4>
+
+          {!totalPrice ? (
+            <div style={{
+              textAlign: 'center',
+              padding: '20px',
+              backgroundColor: '#f8fafc',
+              borderRadius: '8px',
+              border: '1px solid #e5e7eb'
+            }}>
+              <div style={{
+                width: '48px',
+                height: '48px',
+                margin: '0 auto 12px',
+                backgroundColor: '#f3f4f6',
+                borderRadius: '50%',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: '20px',
+                color: '#6b7280'
+              }}>
+                💰
+              </div>
+              <p style={{
+                color: '#374151',
+                marginBottom: '8px',
+                fontSize: '16px',
+                fontWeight: '500'
+              }}>
+                Precio total no establecido
+              </p>
+              <p style={{
+                color: '#6b7280',
+                fontSize: '14px',
+                lineHeight: '1.5',
+                marginBottom: '16px'
+              }}>
+                Primero establece el precio total de la compra usando 'Finalizar Compra'
+              </p>
+              <button
+                onClick={() => {
+                  setSplitDialogOpen(false);
+                  setFinalizeDialogOpen(true);
+                }}
+                className="blue-button"
+                style={{
+                  backgroundColor: '#3b82f6',
+                  color: 'white',
+                  border: 'none',
+                  padding: '8px 16px',
+                  borderRadius: '6px',
+                  cursor: 'pointer',
+                  fontWeight: '500',
+                  fontSize: '14px'
+                }}
+              >
+                Establecer Precio
+              </button>
+            </div>
+          ) : (
+            <>
+              {/* Resumen de gastos */}
+              <div style={{
+                backgroundColor: '#f8fafc',
+                padding: '16px',
+                borderRadius: '8px',
+                border: '1px solid #e5e7eb',
+                marginBottom: '20px'
+              }}>
+                <div style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
+                  gap: '12px',
+                  marginBottom: '16px'
+                }}>
+                  <div style={{
+                    backgroundColor: 'white',
+                    padding: '12px',
+                    borderRadius: '6px',
+                    border: '1px solid #d1d5db',
+                    textAlign: 'center'
+                  }}>
+                    <div style={{
+                      fontSize: '12px',
+                      color: '#6b7280',
+                      marginBottom: '4px',
+                      fontWeight: '500'
+                    }}>
+                      TOTAL GASTADO
+                    </div>
+                    <div style={{
+                      fontSize: '18px',
+                      fontWeight: '700',
+                      color: '#1f2937'
+                    }}>
+                      {totalPrice.toFixed(2)} €
+                    </div>
+                  </div>
+
+                  <div style={{
+                    backgroundColor: 'white',
+                    padding: '12px',
+                    borderRadius: '6px',
+                    border: '1px solid #d1d5db',
+                    textAlign: 'center'
+                  }}>
+                    <div style={{
+                      fontSize: '12px',
+                      color: '#6b7280',
+                      marginBottom: '4px',
+                      fontWeight: '500'
+                    }}>
+                      PERSONAS
+                    </div>
+                    <div style={{
+                      fontSize: '18px',
+                      fontWeight: '700',
+                      color: '#1f2937'
+                    }}>
+                      {participants.length}
+                    </div>
+                  </div>
+
+                  <div style={{
+                    backgroundColor: '#10b981',
+                    padding: '12px',
+                    borderRadius: '6px',
+                    border: '1px solid #059669',
+                    textAlign: 'center'
+                  }}>
+                    <div style={{
+                      fontSize: '12px',
+                      color: 'white',
+                      marginBottom: '4px',
+                      fontWeight: '500',
+                      opacity: 0.9
+                    }}>
+                      POR PERSONA
+                    </div>
+                    <div style={{
+                      fontSize: '18px',
+                      fontWeight: '700',
+                      color: 'white'
+                    }}>
+                      {sharePerPerson.toFixed(2)} €
+                    </div>
+                  </div>
+                </div>
+
+                <div style={{
+                  fontSize: '14px',
+                  color: '#6b7280',
+                  textAlign: 'center'
+                }}>
+                </div>
+              </div>
+
+              {/* Información adicional */}
+              <div style={{
+                marginTop: '16px',
+                padding: '12px',
+                backgroundColor: '#f0f9ff',
+                borderRadius: '6px',
+                border: '1px solid #bae6fd'
+              }}>
+                <p style={{
+                  color: '#0369a1',
+                  margin: 0,
+                  fontSize: '13px',
+                  lineHeight: '1.4'
+                }}>
+                  💡 <strong>Consejo:</strong> Puedes copiar este resumen para compartirlo con los demás participantes.
+                </p>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  // Estados de carga y error
   if (loading) return (
     <div className="elegant-loading" style={{
       display: 'flex',
@@ -1997,6 +1747,7 @@ export function ShoppingList() {
     </div>
   );
 
+  // Render principal de la aplicación
   return (
     <div className="elegant-app-container" style={{
       minHeight: '100vh',
@@ -2006,22 +1757,22 @@ export function ShoppingList() {
     }}>
 
       <ToastContainer
-        position="top-center"
-        autoClose={3000}
-        hideProgressBar={false}
-        newestOnTop={false}
-        closeOnClick
-        rtl={false}
-        pauseOnFocusLoss
-        draggable
-        pauseOnHover
         style={{
-          fontSize: '14px',
+          position: 'fixed',
+          top: '20px',
+          left: '50%',
+          transform: 'translateX(-50%)',
+          zIndex: 2000,
+          maxWidth: '90%'
         }}
+        closeButton={false}
+        autoClose={2000}
+        hideProgressBar={true}
       />
 
+      {/* Barra de navegación */}
       <nav style={{
-        backgroundColor: 'white',
+        backgroundColor: '#F0F9FF',
         boxShadow: '0 2px 10px rgba(0,0,0,0.1)',
         padding: '16px 0',
         flexShrink: 0,
@@ -2101,6 +1852,7 @@ export function ShoppingList() {
         </div>
       </nav>
 
+      {/* Contenido principal */}
       <main className="elegant-main-content" style={{
         flex: 1,
         display: 'flex',
@@ -2111,7 +1863,7 @@ export function ShoppingList() {
         padding: '0'
       }}>
         <div className="elegant-content-card" style={{
-          backgroundColor: 'white',
+          backgroundColor: '#F0F9FF',
           borderRadius: '0',
           boxShadow: 'none',
           padding: '24px',
@@ -2174,7 +1926,9 @@ export function ShoppingList() {
                       fontSize: '14px',
                       fontWeight: '500',
                       transition: 'all 0.2s',
-                      minWidth: 'fit-content'
+                      minWidth: 'fit-content',
+                      color: "black",
+                      borderColor: ""
                     }}
                     onMouseEnter={(e) => {
                       if (!isCurrentListShared()) {
@@ -2439,7 +2193,7 @@ export function ShoppingList() {
                           alignItems: 'center',
                           gap: '8px',
                           padding: '12px 16px',
-                          backgroundColor: `${categoryInfo.color}15`,
+                          backgroundColor: `${categoryInfo.color}99`,
                           borderLeft: `4px solid ${categoryInfo.color}`,
                           borderRadius: '8px',
                           margin: '16px 0 8px 0',
@@ -2455,25 +2209,15 @@ export function ShoppingList() {
                           </span>
                           <h4 style={{
                             fontSize: '16px',
-                            fontWeight: '600',
-                            color: categoryInfo.color,
+                            fontWeight: '700',
+                            color: 'white',
                             margin: 0,
                             flex: '1 1 auto',
                             minWidth: '120px'
                           }}>
                             {categoryInfo.name}
                           </h4>
-                          <span style={{
-                            fontSize: '14px',
-                            color: '#6B7280',
-                            flexShrink: 0,
-                            backgroundColor: 'rgba(255, 255, 255, 0.7)',
-                            padding: '4px 8px',
-                            borderRadius: '12px',
-                            fontWeight: '500'
-                          }}>
-                            {groupedPendingItems[category].length} {groupedPendingItems[category].length === 1 ? 'item' : 'items'}
-                          </span>
+                          {/* CONTADOR ELIMINADO - Solo queda el nombre de la categoría */}
                         </div>
                         <ul className="elegant-items-list" style={{
                           listStyle: 'none',
@@ -2500,7 +2244,7 @@ export function ShoppingList() {
                         alignItems: 'center',
                         gap: '8px',
                         padding: '12px 16px',
-                        backgroundColor: '#10B98115',
+                        backgroundColor: '#10B98199',
                         borderLeft: '4px solid #10B981',
                         borderRadius: '8px',
                         margin: '24px 0 8px 0',
@@ -2516,25 +2260,14 @@ export function ShoppingList() {
                         </span>
                         <h4 style={{
                           fontSize: '16px',
-                          fontWeight: '600',
-                          color: '#10B981',
+                          fontWeight: '700',
+                          color: 'white',
                           margin: 0,
                           flex: '1 1 auto',
                           minWidth: '120px'
                         }}>
                           Comprado
                         </h4>
-                        <span style={{
-                          fontSize: '14px',
-                          color: '#6B7280',
-                          flexShrink: 0,
-                          backgroundColor: 'rgba(255, 255, 255, 0.7)',
-                          padding: '4px 8px',
-                          borderRadius: '12px',
-                          fontWeight: '500'
-                        }}>
-                          {completedItems.length} {completedItems.length === 1 ? 'item' : 'items'}
-                        </span>
                       </div>
                       <ul className="elegant-items-list" style={{
                         listStyle: 'none',
@@ -2609,7 +2342,7 @@ export function ShoppingList() {
         </div>
       </main>
 
-      {/* Modal de Compartir - ESTILO UNIFICADO */}
+      {/* Modal de Compartir */}
       {shareDialogOpen && (
         <div className="modal-overlay" style={{
           position: 'fixed',
@@ -2760,7 +2493,7 @@ export function ShoppingList() {
                     }
                   }}
                 >
-                  {loading ? "Comprobando..." : "Compartir"}
+                  {loading ? "Compartiendo..." : "Compartir"}
                 </button>
               </div>
 
@@ -2774,8 +2507,9 @@ export function ShoppingList() {
                 borderRadius: '8px',
                 border: '1px solid #e5e7eb'
               }}>
-                <p style={{ margin: '0 0 8px 0' }}>• El usuario debe tener una cuenta en BuyNote</p>
-                <p style={{ margin: '0' }}>• Podrá ver y modificar los productos de la lista</p>
+                <p style={{ margin: '0 0 8px 0' }}>• El usuario recibirá acceso a esta lista</p>
+                <p style={{ margin: '0 0 8px 0' }}>• Podrá añadir, marcar y eliminar productos</p>
+                <p style={{ margin: '0' }}>• Solo el propietario puede eliminar la lista</p>
               </div>
 
               {sharedUsers.length > 0 && (
@@ -2869,7 +2603,7 @@ export function ShoppingList() {
         </div>
       )}
 
-      {/* Modal de Dejar de Compartir - ESTILO UNIFICADO */}
+      {/* Modal de Dejar de Compartir */}
       {unshareDialogOpen && (
         <div className="modal-overlay" style={{
           position: 'fixed',
@@ -3031,7 +2765,7 @@ export function ShoppingList() {
         </div>
       )}
 
-      {/* Modal de Confirmación de Eliminación de Item - ESTILO UNIFICADO */}
+      {/* Modal de Confirmación de Eliminación de Item */}
       {confirmDelete && (
         <div className="modal-overlay" style={{
           position: 'fixed',
@@ -3182,7 +2916,7 @@ export function ShoppingList() {
         </div>
       )}
 
-      {/* Modal de Confirmación de Eliminación de Lista - ESTILO UNIFICADO */}
+      {/* Modal de Confirmación de Eliminación de Lista */}
       {confirmListDelete && (
         <div className="modal-overlay" style={{
           position: 'fixed',
@@ -3348,7 +3082,200 @@ export function ShoppingList() {
         </div>
       )}
 
-      {/* Modal de Observaciones - YA ESTÁ CORRECTO */}
+      {finalizeDialogOpen && (
+        <div className="modal-overlay" style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0, 0, 0, 0.6)',
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          zIndex: 9999
+        }}>
+          <div className="dialog-modal" style={{
+            backgroundColor: 'white',
+            borderRadius: '12px',
+            boxShadow: '0 10px 30px rgba(0, 0, 0, 0.3)',
+            width: '90%',
+            maxWidth: '500px',
+            maxHeight: '90vh',
+            display: 'flex',
+            flexDirection: 'column',
+            overflow: 'hidden'
+          }}>
+            <div className="dialog-header" style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              padding: '20px 24px 0',
+              borderBottom: '1px solid #e5e7eb',
+              marginBottom: 0,
+              background: 'white'
+            }}>
+              <h3 style={{
+                margin: 0,
+                fontSize: '1.25rem',
+                fontWeight: '600',
+                color: '#1f2937'
+              }}>
+                Finalizar Compra
+              </h3>
+              <button
+                onClick={() => setFinalizeDialogOpen(false)}
+                className="close-btn"
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  fontSize: '1.5rem',
+                  cursor: 'pointer',
+                  color: '#6b7280',
+                  padding: '4px',
+                  borderRadius: '4px',
+                  transition: 'all 0.2s',
+                  lineHeight: 1,
+                  width: '32px',
+                  height: '32px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center'
+                }}
+                onMouseEnter={(e) => {
+                  e.target.style.backgroundColor = '#f3f4f6';
+                  e.target.style.color = '#374151';
+                }}
+                onMouseLeave={(e) => {
+                  e.target.style.backgroundColor = 'transparent';
+                  e.target.style.color = '#6b7280';
+                }}
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="dialog-content" style={{
+              padding: '24px',
+              flex: 1,
+              overflowY: 'auto',
+              background: 'white'
+            }}>
+              <p style={{ color: 'black', marginBottom: '16px' }}>
+                Introduce el precio total de la compra:
+              </p>
+              <input
+                type="number"
+                step="0.01"
+                min="0"
+                value={purchaseInfo[currentList]?.totalPrice?.toString() || ""}
+                onChange={(e) => {
+                  const price = e.target.value;
+                  setPurchaseInfo(prev => ({
+                    ...prev,
+                    [currentList]: price ? {
+                      ...prev[currentList],
+                      totalPrice: parseFloat(price)
+                    } : null
+                  }));
+                }}
+                placeholder="Precio total (ej: 45.50)"
+                className="elegant-input"
+                style={{
+                  color: 'black',
+                  width: '100%',
+                  padding: '12px',
+                  border: '1px solid #d1d5db',
+                  borderRadius: '8px',
+                  fontSize: '16px'
+                }}
+              />
+
+              {purchaseInfo[currentList]?.totalPrice && (
+                <div style={{
+                  marginTop: '16px',
+                  padding: '12px',
+                  backgroundColor: '#f0f9ff',
+                  borderRadius: '8px',
+                  border: '1px solid #bae6fd'
+                }}>
+                  <p style={{
+                    color: '#0369a1',
+                    margin: 0,
+                    fontSize: '14px'
+                  }}>
+                    💡 El precio total se mostrará en la información de la lista y podrás usarlo para dividir gastos.
+                  </p>
+                </div>
+              )}
+            </div>
+
+            <div className="dialog-buttons" style={{
+              display: 'flex',
+              gap: '12px',
+              justifyContent: 'flex-end',
+              padding: '0 24px 24px',
+              flexWrap: 'wrap',
+              background: 'white'
+            }}>
+              <button
+                onClick={() => setFinalizeDialogOpen(false)}
+                className="cancel-btn"
+                style={{
+                  backgroundColor: '#f3f4f6',
+                  color: '#374151',
+                  border: '1px solid #d1d5db',
+                  padding: '10px 20px',
+                  borderRadius: '8px',
+                  cursor: 'pointer',
+                  fontWeight: '500',
+                  transition: 'all 0.2s',
+                  minWidth: '80px'
+                }}
+                onMouseEnter={(e) => {
+                  e.target.style.backgroundColor = '#e5e7eb';
+                  e.target.style.borderColor = '#9ca3af';
+                }}
+                onMouseLeave={(e) => {
+                  e.target.style.backgroundColor = '#f3f4f6';
+                  e.target.style.borderColor = '#d1d5db';
+                }}
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={() => {
+                  const price = purchaseInfo[currentList]?.totalPrice;
+                  finalizePurchase(currentList, price);
+                  setFinalizeDialogOpen(false);
+                }}
+                className="blue-button"
+                style={{
+                  backgroundColor: '#3b82f6',
+                  color: 'white',
+                  border: 'none',
+                  padding: '10px 20px',
+                  borderRadius: '8px',
+                  cursor: 'pointer',
+                  fontWeight: '500',
+                  transition: 'all 0.2s',
+                  minWidth: '100px'
+                }}
+                onMouseEnter={(e) => {
+                  e.target.style.backgroundColor = '#2563eb';
+                }}
+                onMouseLeave={(e) => {
+                  e.target.style.backgroundColor = '#3b82f6';
+                }}
+              >
+                {purchaseInfo[currentList]?.totalPrice ? 'Guardar Precio' : 'Eliminar Precio'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Observaciones */}
       {observationsDialogOpen && (
         <div className="modal-overlay" style={{
           position: 'fixed',
@@ -3633,177 +3560,7 @@ export function ShoppingList() {
         </div>
       )}
 
-      {finalizeDialogOpen && (
-        <div className="modal-overlay" style={{
-          position: 'fixed',
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          backgroundColor: 'rgba(0, 0, 0, 0.6)',
-          display: 'flex',
-          justifyContent: 'center',
-          alignItems: 'center',
-          zIndex: 9999
-        }}>
-          <div className="dialog-modal" style={{
-            backgroundColor: 'white',
-            borderRadius: '12px',
-            boxShadow: '0 10px 30px rgba(0, 0, 0, 0.3)',
-            width: '90%',
-            maxWidth: '500px',
-            maxHeight: '90vh',
-            display: 'flex',
-            flexDirection: 'column',
-            overflow: 'hidden'
-          }}>
-            <div className="dialog-header" style={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              padding: '20px 24px 0',
-              borderBottom: '1px solid #e5e7eb',
-              marginBottom: 0,
-              background: 'white'
-            }}>
-              <h3 style={{
-                margin: 0,
-                fontSize: '1.25rem',
-                fontWeight: '600',
-                color: '#1f2937'
-              }}>
-                Finalizar Compra
-              </h3>
-              <button
-                onClick={() => setFinalizeDialogOpen(false)}
-                className="close-btn"
-                style={{
-                  background: 'none',
-                  border: 'none',
-                  fontSize: '1.5rem',
-                  cursor: 'pointer',
-                  color: '#6b7280',
-                  padding: '4px',
-                  borderRadius: '4px',
-                  transition: 'all 0.2s',
-                  lineHeight: 1,
-                  width: '32px',
-                  height: '32px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center'
-                }}
-                onMouseEnter={(e) => {
-                  e.target.style.backgroundColor = '#f3f4f6';
-                  e.target.style.color = '#374151';
-                }}
-                onMouseLeave={(e) => {
-                  e.target.style.backgroundColor = 'transparent';
-                  e.target.style.color = '#6b7280';
-                }}
-              >
-                ×
-              </button>
-            </div>
-
-            <div className="dialog-content" style={{
-              padding: '24px',
-              flex: 1,
-              overflowY: 'auto',
-              background: 'white'
-            }}>
-              <p style={{ color: 'black', marginBottom: '16px' }}>
-                Introduce el precio total de la compra:
-              </p>
-              <input
-                type="number"
-                step="0.01"
-                value={purchaseInfo[currentList]?.totalPrice?.toString() || ""}
-                onChange={(e) => {
-                  const price = e.target.value;
-                  setPurchaseInfo(prev => ({
-                    ...prev,
-                    [currentList]: price ? { totalPrice: parseFloat(price) } : null
-                  }));
-                }}
-                placeholder="Precio total (ej: 45.50)"
-                className="elegant-input"
-                style={{
-                  color: 'grey',
-                  width: '100%',
-                  padding: '12px',
-                  border: '1px solid #d1d5db',
-                  borderRadius: '8px',
-                  fontSize: '16px'
-                }}
-              />
-            </div>
-
-            <div className="dialog-buttons" style={{
-              display: 'flex',
-              gap: '12px',
-              justifyContent: 'flex-end',
-              padding: '0 24px 24px',
-              flexWrap: 'wrap',
-              background: 'white'
-            }}>
-              <button
-                onClick={() => setFinalizeDialogOpen(false)}
-                className="cancel-btn"
-                style={{
-                  backgroundColor: '#f3f4f6',
-                  color: '#374151',
-                  border: '1px solid #d1d5db',
-                  padding: '10px 20px',
-                  borderRadius: '8px',
-                  cursor: 'pointer',
-                  fontWeight: '500',
-                  transition: 'all 0.2s',
-                  minWidth: '80px'
-                }}
-                onMouseEnter={(e) => {
-                  e.target.style.backgroundColor = '#e5e7eb';
-                  e.target.style.borderColor = '#9ca3af';
-                }}
-                onMouseLeave={(e) => {
-                  e.target.style.backgroundColor = '#f3f4f6';
-                  e.target.style.borderColor = '#d1d5db';
-                }}
-              >
-                Cancelar
-              </button>
-              <button
-                onClick={() => {
-                  const price = purchaseInfo[currentList]?.totalPrice;
-                  finalizePurchase(currentList, price);
-                  setFinalizeDialogOpen(false);
-                }}
-                className="blue-button"
-                style={{
-                  backgroundColor: '#3b82f6',
-                  color: 'white',
-                  border: 'none',
-                  padding: '10px 20px',
-                  borderRadius: '8px',
-                  cursor: 'pointer',
-                  fontWeight: '500',
-                  transition: 'all 0.2s',
-                  minWidth: '80px'
-                }}
-                onMouseEnter={(e) => {
-                  e.target.style.backgroundColor = '#2563eb';
-                }}
-                onMouseLeave={(e) => {
-                  e.target.style.backgroundColor = '#3b82f6';
-                }}
-              >
-                {purchaseInfo[currentList]?.totalPrice ? 'Guardar' : 'Eliminar Precio'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
+      {/* Modal de División de Gastos */}
       {splitDialogOpen && (
         <div className="modal-overlay" style={{
           position: 'fixed',
@@ -3878,6 +3635,97 @@ export function ShoppingList() {
             </div>
 
             <SplitDialogContent />
+
+            <div className="dialog-buttons" style={{
+              display: 'flex',
+              gap: '12px',
+              justifyContent: 'flex-end',
+              padding: '0 24px 24px',
+              flexWrap: 'wrap',
+              background: 'white'
+            }}>
+              <button
+                onClick={() => setSplitDialogOpen(false)}
+                className="cancel-btn"
+                style={{
+                  backgroundColor: '#f3f4f6',
+                  color: '#374151',
+                  border: '1px solid #d1d5db',
+                  padding: '10px 20px',
+                  borderRadius: '8px',
+                  cursor: 'pointer',
+                  fontWeight: '500',
+                  transition: 'all 0.2s',
+                  minWidth: '80px'
+                }}
+                onMouseEnter={(e) => {
+                  e.target.style.backgroundColor = '#e5e7eb';
+                  e.target.style.borderColor = '#9ca3af';
+                }}
+                onMouseLeave={(e) => {
+                  e.target.style.backgroundColor = '#f3f4f6';
+                  e.target.style.borderColor = '#d1d5db';
+                }}
+              >
+                Cerrar
+              </button>
+
+              {/* Botón para copiar resumen - solo visible cuando hay precio */}
+              {purchaseInfo[currentList]?.totalPrice && (isCurrentListShared() || isCurrentListSharedByMe()) && (
+                <button
+                  onClick={() => {
+                    const currentPurchaseInfo = purchaseInfo[currentList];
+                    const totalPrice = currentPurchaseInfo?.totalPrice;
+                    const currentListData = allLists.find(list => list.id === currentList);
+                    const participants = [
+                      currentListData?.ownerEmail || auth.currentUser?.email || "Tú",
+                      ...(currentListData?.sharedWith || [])
+                    ];
+                    const sharePerPerson = totalPrice ? totalPrice / participants.length : 0;
+
+                    const result = `💰 RESUMEN DE GASTOS - ${currentListData?.name}
+
+💶 Total gastado: ${totalPrice.toFixed(2)} €
+👥 Número de personas: ${participants.length}
+💳 Precio por persona: ${sharePerPerson.toFixed(2)} €
+
+DESGLOSE:
+${participants.map((p, i) => `${i + 1}. ${p === auth.currentUser?.email ? 'Tú' : p}: ${sharePerPerson.toFixed(2)} €`).join('\n')}
+
+¡Gracias por participar! 🛒`;
+
+                    navigator.clipboard.writeText(result);
+                    showToast("Resumen copiado al portapapeles", 'success');
+                  }}
+                  className="blue-button"
+                  style={{
+                    backgroundColor: '#10b981',
+                    color: 'white',
+                    border: 'none',
+                    padding: '10px 20px',
+                    borderRadius: '8px',
+                    cursor: 'pointer',
+                    fontWeight: '500',
+                    transition: 'all 0.2s',
+                    minWidth: '100px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.target.style.backgroundColor = '#059669';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.target.style.backgroundColor = '#10b981';
+                  }}
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M8 16H6C4.89543 16 4 15.1046 4 14V6C4 4.89543 4.89543 4 6 4H14C15.1046 4 16 4.89543 16 6V8M10 20H18C19.1046 20 20 19.1046 20 18V10C20 8.89543 19.1046 8 18 8H10C8.89543 8 8 8.89543 8 10V18C8 19.1046 8.89543 20 10 20Z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                  Copiar
+                </button>
+              )}
+            </div>
           </div>
         </div>
       )}
@@ -4137,7 +3985,7 @@ export function ShoppingList() {
           width: 100%;
           flex: 1;
           display: flex;
-          flex-direction: column;
+          flexDirection: column;
         }
         
         .section-header {
@@ -4241,15 +4089,6 @@ export function ShoppingList() {
           flex-shrink: 0;
         }
         
-        .item-price {
-          background-color: #10B981;
-          color: white;
-          padding: 4px 8px;
-          border-radius: 6px;
-          font-size: 14px;
-          font-weight: 600;
-        }
-        
         .elegant-delete-btn {
           background: none;
           border: none;
@@ -4276,7 +4115,7 @@ export function ShoppingList() {
           color: white;
           border: none;
           padding: 12px 20px;
-          border-radius: 8px;
+          borderRadius: 8px;
           cursor: pointer;
           font-size: 1rem;
           transition: all 0.3s ease;
@@ -4304,95 +4143,153 @@ export function ShoppingList() {
         
         /* Responsive para móviles */
         @media (max-width: 768px) {
-          .elegant-content-card {
-            padding: 16px;
-          }
-          
-          .elegant-list-creator {
-            flex-direction: column;
-            gap: 12px;
-            padding: 12px;
-          }
-          
-          .elegant-item-adder {
-            flex-direction: column;
-            gap: 12px;
-          }
-          
-          .selector-header {
-            flex-direction: column;
-            align-items: flex-start;
-          }
-          
-          .list-actions {
-            width: 100%;
-            justify-content: flex-start;
-          }
-          
-          .section-header {
-            flex-direction: column;
-            align-items: flex-start;
-          }
-          
-          .category-header {
-            flex-direction: column;
-            align-items: flex-start;
-            gap: 8px;
-          }
-          
-          .item-content {
-            flex-direction: column;
-            align-items: flex-start;
-            gap: 8px;
-          }
-          
-          .item-actions {
-            width: 100%;
-            justify-content: flex-end;
-            margin-top: 8px;
-          }
-        }
+    .elegant-content-card {
+      padding: 12px;
+      margin: 0;
+      border-radius: 0;
+    }
+    
+    .elegant-list-creator {
+      flex-direction: column;
+      padding: 12px;
+      margin-bottom: 16px;
+    }
+    
+    .elegant-list-creator input {
+      min-width: 100%;
+      margin-bottom: 8px;
+    }
+    
+    .selector-header {
+      flex-direction: column;
+      align-items: stretch;
+      gap: 12px;
+    }
+    
+    .list-actions {
+      justify-content: space-between;
+      width: 100%;
+    }
+    
+    .elegant-item-adder {
+      flex-direction: column;
+    }
+    
+    .elegant-item-adder input {
+      min-width: 100%;
+      margin-bottom: 8px;
+    }
+    
+    .elegant-item {
+      flex-direction: column;
+      align-items: flex-start;
+      padding: 12px;
+    }
+    
+    .item-content {
+      width: 100%;
+      margin-bottom: 8px;
+    }
+    
+    .item-actions {
+      width: 100%;
+      justify-content: flex-end;
+    }
+    
+    .category-header {
+      padding: 10px 12px;
+      flex-direction: row;
+      align-items: center;
+    }
+    
+    .category-header h4 {
+      font-size: 14px;
+    }
+    
+    .dialog-modal {
+      width: 95% !important;
+      margin: 10px;
+    }
+    
+    .navbar-content {
+      flex-direction: column;
+      text-align: center;
+    }
+  }
         
         @media (max-width: 480px) {
-          .elegant-content-card {
-            padding: 12px;
-          }
-          
-          .navbar-content {
-            flex-direction: column;
-            gap: 12px;
-          }
-          
-          .elegant-navbar {
-            padding: 12px 0;
-          }
-        }
+    .elegant-content-card {
+      padding: 8px;
+    }
+    
+    .elegant-list-creator,
+    .elegant-item-adder {
+      padding: 10px;
+    }
+    
+    .elegant-input,
+    .elegant-select {
+      font-size: 14px;
+      padding: 10px 12px;
+    }
+    
+    .elegant-create-btn,
+    .elegant-add-btn {
+      padding: 10px 16px;
+      font-size: 14px;
+    }
+    
+    .item-text {
+      font-size: 14px;
+    }
+    
+    .category-header {
+      padding: 8px 10px;
+    }
+    
+    .category-header h4 {
+      font-size: 13px;
+    }
+  }
 
         /* Para pantallas grandes */
-        @media (min-width: 1200px) {
-          .elegant-content-card {
-            max-width: 1200px;
-            margin: 0 auto;
-            border-radius: 16px;
-            box-shadow: 0 4px 20px rgba(0,0,0,0.1);
-            margin: 0 auto 32px;
-            min-height: auto;
-          }
-          
-          .elegant-main-content {
-            padding: 0 20px;
-          }
-        }
-
-        /* Animaciones */
-        @keyframes spin {
-          0% { transform: rotate(0deg); }
-          100% { transform: rotate(360deg); }
-        }
-        
-        .elegant-spinner {
-          animation: spin 1s linear infinite;
-        }
+        @media (min-width: 769px) and (max-width: 1024px) {
+    .elegant-content-card {
+      padding: 20px;
+      margin: 0 auto;
+      max-width: 95%;
+    }
+    
+    .elegant-list-creator {
+      flex-wrap: nowrap;
+    }
+  }
+  
+  @media (min-width: 1025px) {
+    .elegant-content-card {
+      max-width: 1200px;
+      margin: 0 auto 32px;
+      border-radius: 16px;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+    }
+    
+    .elegant-main-content {
+      padding: 0 20px;
+    }
+  }
+  
+  /* Asegurar que todos los contenedores sean responsive */
+  .elegant-app-container,
+  .elegant-main-content,
+  .elegant-content-card {
+    width: 100%;
+    max-width: 100%;
+  }
+  
+  /* Mejorar el scroll en móviles */
+  .elegant-items-container {
+    -webkit-overflow-scrolling: touch;
+  }
 
         /* Mejoras de accesibilidad */
         @media (prefers-reduced-motion: reduce) {

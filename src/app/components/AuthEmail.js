@@ -3,7 +3,8 @@ import {
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword
 } from "firebase/auth";
-import { auth } from "../firebase";
+import { auth, db } from "../firebase";
+import { doc, setDoc, serverTimestamp } from "firebase/firestore";
 import { FaEye, FaEyeSlash } from "react-icons/fa";
 
 export function AuthEmail() {
@@ -13,6 +14,35 @@ export function AuthEmail() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [showPassword, setShowPassword] = useState(false);
+
+  const saveUserToFirestore = async (user) => {
+    try {
+      // Crear documento en la colección 'users' con el EMAIL como ID
+      await setDoc(doc(db, "users", user.email), {
+        email: user.email,
+        uid: user.uid,
+        searchEmail: user.email.toLowerCase(), // ← AÑADIDO: para búsquedas case-insensitive
+        createdAt: serverTimestamp(),
+        lastLogin: serverTimestamp()
+      });
+      console.log("Usuario guardado en Firestore correctamente con email como ID");
+    } catch (error) {
+      console.error("Error al guardar usuario en Firestore:", error);
+      throw new Error("No se pudo completar el registro. Intenta nuevamente.");
+    }
+  };
+
+  const updateLastLogin = async (user) => {
+    try {
+      await setDoc(doc(db, "users", user.email), {
+        lastLogin: serverTimestamp(),
+        uid: user.uid, // Mantener el UID también
+        searchEmail: user.email.toLowerCase() // ← AÑADIDO: mantener actualizado
+      }, { merge: true });
+    } catch (error) {
+      console.error("Error al actualizar último login:", error);
+    }
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -35,13 +65,17 @@ export function AuthEmail() {
     try {
       setLoading(true);
       setError(null);
-  
+
       console.log("Intentando autenticar con:", { email, isLogin });
-  
+
       if (isLogin) {
-        await signInWithEmailAndPassword(auth, email, password);
+        const userCredential = await signInWithEmailAndPassword(auth, email, password);
+        // Actualizar último login
+        await updateLastLogin(userCredential.user);
       } else {
-        await createUserWithEmailAndPassword(auth, email, password);
+        const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+        // Guardar usuario en Firestore
+        await saveUserToFirestore(userCredential.user);
       }
     } catch (error) {
       console.error("Error completo:", error);
@@ -321,7 +355,7 @@ export function AuthEmail() {
             }
             
             .auth-title {
-              font-size: 1.3rem;
+              fontSize: 1.3rem;
             }
           }
         `}</style>
