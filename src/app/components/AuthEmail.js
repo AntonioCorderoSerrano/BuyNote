@@ -5,7 +5,7 @@ import {
 } from "firebase/auth";
 import { auth, db } from "../firebase";
 import { doc, setDoc, serverTimestamp } from "firebase/firestore";
-import { FaEye, FaEyeSlash } from "react-icons/fa";
+import { FaEye, FaEyeSlash, FaShoppingCart } from "react-icons/fa";
 
 export function AuthEmail() {
   const [email, setEmail] = useState("");
@@ -17,11 +17,10 @@ export function AuthEmail() {
 
   const saveUserToFirestore = async (user) => {
     try {
-      // Crear documento en la colección 'users' con el EMAIL como ID
       await setDoc(doc(db, "users", user.email), {
         email: user.email,
         uid: user.uid,
-        searchEmail: user.email.toLowerCase(), // ← AÑADIDO: para búsquedas case-insensitive
+        searchEmail: user.email.toLowerCase(),
         createdAt: serverTimestamp(),
         lastLogin: serverTimestamp()
       });
@@ -36,8 +35,8 @@ export function AuthEmail() {
     try {
       await setDoc(doc(db, "users", user.email), {
         lastLogin: serverTimestamp(),
-        uid: user.uid, // Mantener el UID también
-        searchEmail: user.email.toLowerCase() // ← AÑADIDO: mantener actualizado
+        uid: user.uid,
+        searchEmail: user.email.toLowerCase()
       }, { merge: true });
     } catch (error) {
       console.error("Error al actualizar último login:", error);
@@ -70,11 +69,9 @@ export function AuthEmail() {
 
       if (isLogin) {
         const userCredential = await signInWithEmailAndPassword(auth, email, password);
-        // Actualizar último login
         await updateLastLogin(userCredential.user);
       } else {
         const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-        // Guardar usuario en Firestore
         await saveUserToFirestore(userCredential.user);
       }
     } catch (error) {
@@ -113,253 +110,349 @@ export function AuthEmail() {
 
   return (
     <div style={{
-      position: 'fixed',
-      top: 0,
-      left: 0,
-      width: '100vw',
-      height: '100vh',
+      minHeight: '100vh',
+      backgroundColor:"#F0F9FF",
       display: 'flex',
-      justifyContent: 'center',
+      flexDirection: 'column',
       alignItems: 'center',
-      backgroundImage: 'url(https://images.unsplash.com/photo-1606787366850-de6330128bfc?ixlib=rb-1.2.1&auto=format&fit=crop&w=1350&q=80)',
-      backgroundSize: 'cover',
-      backgroundPosition: 'center',
-      backgroundRepeat: 'no-repeat',
-      zIndex: 0,
-      padding: '20px',
-      boxSizing: 'border-box'
+      justifyContent: 'center',
+      padding: '0',
+      position: 'relative'
     }}>
-
+      
+      {/* Fondo con gradiente suave */}
       <div style={{
         position: 'absolute',
         top: 0,
         left: 0,
-        width: '100%',
-        height: '100%',
-        backgroundColor: 'rgba(0, 0, 0, 0.4)',
-        zIndex: 1
+        right: 0,
+        bottom: 0,
+        opacity: 0.03,
+        zIndex: 0
       }}></div>
-      
-      <div style={{
-        backgroundColor: 'rgba(255, 255, 255, 0.95)',
-        padding: '2.5rem',
-        borderRadius: '12px',
-        boxShadow: '0 4px 30px rgba(0, 0, 0, 0.15)',
-        width: '100%',
-        maxWidth: '450px',
-        zIndex: 2,
-        position: 'relative'
-      }}>
-        <h2 style={{
-          color: '#0d47a1',
-          textAlign: 'center',
-          marginBottom: '2rem',
-          fontSize: '1.8rem',
-          fontWeight: 600
-        }}>{isLogin ? "Iniciar sesión" : "Registrarse"}</h2>
 
-        {error && <div style={{
-          color: '#f44336',
-          backgroundColor: 'rgba(244, 67, 54, 0.1)',
-          padding: '0.75rem',
-          borderRadius: '8px',
-          marginBottom: '1.5rem',
+      {/* Contenido principal centrado */}
+      <div style={{
+        width: '100%',
+        maxWidth: '400px',
+        padding: '40px',
+        position: 'relative',
+        backgroundColor:"#F0F9FF",
+        zIndex: 1
+      }}>
+        
+        <div style={{
           textAlign: 'center',
-          fontSize: '0.9rem',
-          fontWeight: 500
-        }}>{error}</div>}
+          marginBottom: '40px'
+        }}>
+          <h1 style={{
+            fontSize: '32px',
+            fontWeight: '800',
+            color: '#1F2937',
+            margin: '0 0 8px 0',
+            background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+            WebkitBackgroundClip: 'text',
+            WebkitTextFillColor: 'transparent'
+          }}>
+            BuyNote
+          </h1>
+          <p style={{
+            color: '#6B7280',
+            fontSize: '16px',
+            margin: 0,
+            fontWeight: '500'
+          }}>
+            {isLogin ? "Bienvenido de vuelta" : "Crea tu cuenta"}
+          </p>
+        </div>
+
+        {/* Mensaje de error */}
+        {error && (
+          <div style={{
+            backgroundColor: '#FEF2F2',
+            border: '1px solid #FECACA',
+            color: '#DC2626',
+            padding: '16px',
+            borderRadius: '12px',
+            marginBottom: '24px',
+            fontSize: '14px',
+            fontWeight: '500',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px'
+          }}>
+            <div style={{
+              width: '20px',
+              height: '20px',
+              backgroundColor: '#DC2626',
+              borderRadius: '50%',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontSize: '12px',
+              color: 'white',
+              flexShrink: 0
+            }}>
+              !
+            </div>
+            {error}
+          </div>
+        )}
 
         <form onSubmit={handleSubmit} style={{
           display: 'flex',
           flexDirection: 'column',
-          gap: '1.5rem'
+          gap: '20px'
         }}>
-          <div style={{
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '0.5rem'
-          }}>
-            <div style={{
-              position: 'relative',
-              width: '100%'
+          
+          {/* Campo de email */}
+          <div>
+            <label style={{
+              display: 'block',
+              fontSize: '14px',
+              fontWeight: '600',
+              color: '#374151',
+              marginBottom: '8px'
             }}>
-              <input
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="Correo electrónico"
-                style={{
-                  padding: '1rem',
-                  border: '1px solid #bbdefb',
-                  borderRadius: '8px',
-                  fontSize: '1rem',
-                  transition: 'all 0.3s ease',
-                  backgroundColor: 'rgba(255, 255, 255, 0.9)',
-                  width: '100%',
-                  boxSizing: 'border-box',
-                  height: '48px',
-                  color: 'black',
-                  outline: 'none'
-                }}
-                required
-                disabled={loading}
-              />
-            </div>
+              Correo Electrónico
+            </label>
+            <input
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="tucorreo@ejemplo.com"
+              style={{
+                width: '100%',
+                padding: '16px',
+                border: '1px solid #D1D5DB',
+                borderRadius: '12px',
+                fontSize: '16px',
+                color: '#1F2937',
+                backgroundColor: 'white',
+                outline: 'none',
+                transition: 'all 0.2s',
+                boxSizing: 'border-box'
+              }}
+              onFocus={(e) => e.target.style.borderColor = '#3B82F6'}
+              onBlur={(e) => e.target.style.borderColor = '#D1D5DB'}
+              required
+              disabled={loading}
+            />
           </div>
 
-          <div style={{
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '0.5rem'
-          }}>
-            <div style={{
-              position: 'relative',
-              width: '100%',
-              display: 'flex',
-              alignItems: 'center'
+          {/* Campo de contraseña */}
+          <div>
+            <label style={{
+              display: 'block',
+              fontSize: '14px',
+              fontWeight: '600',
+              color: '#374151',
+              marginBottom: '8px'
             }}>
+              Contraseña
+            </label>
+            <div style={{ position: 'relative' }}>
               <input
                 type={showPassword ? "text" : "password"}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                placeholder="Contraseña"
+                placeholder="Tu contraseña"
                 style={{
-                  padding: '1rem 3rem 1rem 1rem',
-                  border: '1px solid #bbdefb',
-                  borderRadius: '8px',
-                  fontSize: '1rem',
-                  transition: 'all 0.3s ease',
-                  backgroundColor: 'rgba(255, 255, 255, 0.9)',
                   width: '100%',
-                  boxSizing: 'border-box',
-                  height: '48px',
-                  color: 'black',
-                  outline: 'none'
+                  padding: '16px 50px 16px 16px',
+                  border: '1px solid #D1D5DB',
+                  borderRadius: '12px',
+                  fontSize: '16px',
+                  color: '#1F2937',
+                  backgroundColor: 'white',
+                  outline: 'none',
+                  transition: 'all 0.2s',
+                  boxSizing: 'border-box'
                 }}
+                onFocus={(e) => e.target.style.borderColor = '#3B82F6'}
+                onBlur={(e) => e.target.style.borderColor = '#D1D5DB'}
                 required
                 disabled={loading}
               />
               <button
                 type="button"
-                style={{
-                  position: 'absolute',
-                  right: '1rem',
-                  background: 'none',
-                  border: 'none',
-                  color: '#757575',
-                  cursor: 'pointer',
-                  padding: '0.5rem',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  transition: 'all 0.3s ease',
-                  height: '100%'
-                }}
                 onClick={togglePasswordVisibility}
                 disabled={loading}
+                style={{
+                  position: 'absolute',
+                  right: '16px',
+                  top: '50%',
+                  transform: 'translateY(-50%)',
+                  background: 'none',
+                  border: 'none',
+                  color: '#6B7280',
+                  cursor: 'pointer',
+                  padding: '8px',
+                  borderRadius: '6px',
+                  transition: 'all 0.2s',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center'
+                }}
+                onMouseEnter={(e) => e.target.style.backgroundColor = '#F3F4F6'}
+                onMouseLeave={(e) => e.target.style.backgroundColor = 'transparent'}
               >
-                {showPassword ? <FaEyeSlash /> : <FaEye />}
+                {showPassword ? <FaEyeSlash size={18} /> : <FaEye size={18} />}
               </button>
             </div>
           </div>
 
+          {/* Botón de envío */}
           <button
             type="submit"
+            disabled={loading}
             style={{
-              backgroundColor: '#1e88e5',
+              width: '100%',
+              padding: '16px',
+              backgroundColor: loading ? '#9CA3AF' : '#3B82F6',
               color: 'white',
               border: 'none',
-              padding: '1rem',
-              borderRadius: '8px',
-              fontSize: '1rem',
-              fontWeight: 500,
-              cursor: 'pointer',
-              transition: 'all 0.3s ease',
-              marginTop: '0.5rem',
+              borderRadius: '12px',
+              fontSize: '16px',
+              fontWeight: '600',
+              cursor: loading ? 'not-allowed' : 'pointer',
+              transition: 'all 0.2s',
               display: 'flex',
-              justifyContent: 'center',
               alignItems: 'center',
-              gap: '0.5rem',
-              height: '48px'
+              justifyContent: 'center',
+              gap: '8px',
+              marginTop: '8px',
+              boxShadow: '0 4px 15px rgba(59, 130, 246, 0.3)'
             }}
-            disabled={loading}
+            onMouseEnter={(e) => {
+              if (!loading) {
+                e.target.style.backgroundColor = '#2563EB';
+                e.target.style.transform = 'translateY(-1px)';
+                e.target.style.boxShadow = '0 6px 20px rgba(59, 130, 246, 0.4)';
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (!loading) {
+                e.target.style.backgroundColor = '#3B82F6';
+                e.target.style.transform = 'translateY(0)';
+                e.target.style.boxShadow = '0 4px 15px rgba(59, 130, 246, 0.3)';
+              }
+            }}
           >
             {loading ? (
-              <span style={{ display: 'inline-block', animation: 'spin 1s linear infinite' }}>⏳</span>
-            ) : isLogin ? (
-              "Ingresar"
+              <>
+                <div style={{
+                  width: '20px',
+                  height: '20px',
+                  border: '2px solid transparent',
+                  borderTop: '2px solid white',
+                  borderRadius: '50%',
+                  animation: 'spin 1s linear infinite'
+                }}></div>
+                {isLogin ? "Iniciando sesión..." : "Creando cuenta..."}
+              </>
             ) : (
-              "Crear cuenta"
+              <>
+                {isLogin ? "Iniciar Sesión" : "Crear Cuenta"}
+              </>
             )}
           </button>
         </form>
 
-        <button
-          onClick={() => setIsLogin(!isLogin)}
-          style={{
-            background: 'none',
-            border: 'none',
-            color: '#1e88e5',
-            cursor: 'pointer',
-            fontSize: '0.9rem',
-            marginTop: '1.5rem',
+        {/* Toggle entre login y registro */}
+        <div style={{
+          textAlign: 'center',
+          marginTop: '32px',
+          paddingTop: '32px',
+          borderTop: '1px solid #E5E7EB'
+        }}>
+          <button
+            onClick={() => setIsLogin(!isLogin)}
+            disabled={loading}
+            style={{
+              background: 'none',
+              border: 'none',
+              color: '#6B7280',
+              cursor: 'pointer',
+              fontSize: '14px',
+              fontWeight: '500',
+              transition: 'all 0.2s',
+              padding: '8px 16px',
+              borderRadius: '8px'
+            }}
+            onMouseEnter={(e) => {
+              e.target.style.color = '#374151';
+              e.target.style.backgroundColor = '#F3F4F6';
+            }}
+            onMouseLeave={(e) => {
+              e.target.style.color = '#6B7280';
+              e.target.style.backgroundColor = 'transparent';
+            }}
+          >
+            {isLogin ? "¿No tienes cuenta? " : "¿Ya tienes cuenta? "}
+            <span style={{ color: '#3B82F6', fontWeight: '600' }}>
+              {isLogin ? "Regístrate" : "Inicia sesión"}
+            </span>
+          </button>
+        </div>
+
+        {/* Información adicional */}
+        <div style={{
+          marginTop: '32px',
+          padding: '16px',
+          backgroundColor: '#F8FAFC',
+          borderRadius: '12px',
+          border: '1px solid #E2E8F0'
+        }}>
+          <p style={{
+            color: '#6B7280',
+            fontSize: '13px',
             textAlign: 'center',
-            width: '100%',
-            padding: '0.5rem',
-            transition: 'all 0.3s ease',
-            fontWeight: 500
-          }}
-          disabled={loading}
-        >
-          {isLogin ? "¿No tienes cuenta? Regístrate" : "¿Ya tienes cuenta? Inicia sesión"}
-        </button>
-
-        <style jsx global>{`
-          input::placeholder {
-            color: #757575 !important;
-            opacity: 0.7 !important;
-          }
-          
-          @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-          }
-          
-          @media (max-width: 480px) {
-            .auth-card {
-              padding: 1.5rem;
-            }
-            
-            .auth-title {
-              font-size: 1.5rem;
-              margin-bottom: 1.5rem;
-            }
-
-            .auth-form {
-              gap: 1.25rem;
-            }
-
-            .auth-input {
-              padding: 0.875rem;
-              height: 44px;
-            }
-
-            .auth-button {
-              height: 44px;
-            }
-          }
-
-          @media (max-width: 360px) {
-            .auth-card {
-              padding: 1.25rem;
-            }
-            
-            .auth-title {
-              fontSize: 1.3rem;
-            }
-          }
-        `}</style>
+            margin: 0,
+            lineHeight: '1.5'
+          }}>
+            💡 <strong>Consejo:</strong> {isLogin 
+              ? "Usa la misma cuenta en todos tus dispositivos para sincronizar tus listas." 
+              : "Crea una contraseña segura para proteger tu cuenta."}
+          </p>
+        </div>
       </div>
+
+      <style jsx global>{`
+        @keyframes spin {
+          0% { transform: rotate(0deg); }
+          100% { transform: rotate(360deg); }
+        }
+        
+        input::placeholder {
+          color: #9CA3AF !important;
+          opacity: 1 !important;
+        }
+        
+        body {
+          margin: 0;
+          padding: 0;
+          font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+          background-color: white;
+        }
+        
+        /* Responsive */
+        @media (max-width: 480px) {
+          .auth-container {
+            padding: 20px;
+          }
+          
+          .auth-logo {
+            width: 80px;
+            height: 80px;
+            font-size: 32px;
+          }
+          
+          .auth-title {
+            font-size: 28px;
+          }
+        }
+      `}</style>
     </div>
   );
 }
