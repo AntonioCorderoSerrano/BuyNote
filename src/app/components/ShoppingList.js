@@ -708,7 +708,6 @@ export function ShoppingList() {
           totalPrice: parseFloat(totalPrice),
           finalizedAt: new Date(),
           finalizedBy: auth.currentUser?.email || "",
-          autoCalculated: false
         };
 
         await updateDoc(doc(db, "lists", listId), {
