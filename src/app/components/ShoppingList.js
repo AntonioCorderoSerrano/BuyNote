@@ -1087,9 +1087,9 @@ export function ShoppingList() {
 
 
 
-  // Componente elegante para renderizar items individuales
+  // Componente elegante para renderizar items individuales 
   const ElegantItem = ({ item }) => {
-    const isSharedList = isCurrentListShared();
+    const isSharedList = isCurrentListShared() || isCurrentListSharedByMe();
 
     // Calcular categoryInfo dinámicamente basado en la categoría del item
     const categoryInfo = getCategoryInfo(item.category || "OTHER");
@@ -1163,21 +1163,23 @@ export function ShoppingList() {
               )}
             </span>
 
-            {/* INFORMACIÓN DE QUIÉN AÑADIÓ Y QUIÉN COMPRÓ */}
-            <div className="item-metadata" style={{
-              fontSize: '12px',
-              color: '#6B7280',
-              marginTop: '4px'
-            }}>
-              <span className="added-by-info">
-                Añadido por: {item.addedBy?.split('@')[0] || 'Usuario'}
-              </span>
-              {item.completed && item.purchasedBy && (
-                <span className="purchaser-info" style={{ marginLeft: '12px' }}>
-                  • Comprado por: {item.purchasedBy?.split('@')[0] || 'Usuario'}
+            {/* INFORMACIÓN DE QUIÉN AÑADIÓ Y QUIÉN COMPRÓ - SOLO EN LISTAS COMPARTIDAS */}
+            {isSharedList && (
+              <div className="item-metadata" style={{
+                fontSize: '12px',
+                color: '#6B7280',
+                marginTop: '4px'
+              }}>
+                <span className="added-by-info">
+                  Añadido por: {item.addedBy?.split('@')[0] || 'Usuario'}
                 </span>
-              )}
-            </div>
+                {item.completed && item.purchasedBy && (
+                  <span className="purchaser-info" style={{ marginLeft: '12px' }}>
+                    • Comprado por: {item.purchasedBy?.split('@')[0] || 'Usuario'}
+                  </span>
+                )}
+              </div>
+            )}
           </div>
         </div>
 
