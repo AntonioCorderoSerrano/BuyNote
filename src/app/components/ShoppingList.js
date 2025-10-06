@@ -1678,6 +1678,9 @@ export function ShoppingList() {
       p => !paymentParticipants.some(pp => pp.email === p.email)
     );
 
+    // Encontrar el estado de pago del usuario actual
+    const currentUserPayment = payments[auth.currentUser?.email] || { paid: false };
+
     if (!isSharedList) {
       return (
         <div className="dialog-content" style={{ padding: '24px', flex: 1, overflowY: 'auto', background: 'white' }}>
@@ -1693,35 +1696,93 @@ export function ShoppingList() {
       );
     }
 
+    // VISTA PARA USUARIOS NO PROPIETARIOS (solo ven su información)
+    if (!isOwner) {
+      return (
+        <div className="dialog-content" style={{ padding: '24px', flex: 1, overflowY: 'auto', background: 'white' }}>
+          <div style={{ marginBottom: '20px' }}>
+            <h4 style={{ color: '#1f2937', marginBottom: '16px', fontSize: '18px', fontWeight: '600' }}>
+              Mi Pago - División de Gastos
+            </h4>
+
+            {!totalPrice ? (
+              <div style={{ textAlign: 'center', padding: '20px', backgroundColor: '#f8fafc', borderRadius: '8px', border: '1px solid #e5e7eb' }}>
+                <div style={{ width: '48px', height: '48px', margin: '0 auto 12px', backgroundColor: '#f3f4f6', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '20px', color: '#6b7280' }}>
+                  💰
+                </div>
+                <p style={{ color: '#374151', marginBottom: '8px', fontSize: '16px', fontWeight: '500' }}>
+                  Precio total no establecido
+                </p>
+                <p style={{ color: '#6b7280', fontSize: '14px', marginBottom: '16px' }}>
+                  El propietario debe establecer el precio total para calcular la división
+                </p>
+              </div>
+            ) : (
+              <>
+                {/* Información personal del usuario */}
+                <div style={{
+                  backgroundColor: '#f8fafc',
+                  padding: '20px',
+                  borderRadius: '12px',
+                  border: '2px solid #e5e7eb',
+                  marginBottom: '20px',
+                  textAlign: 'center'
+                }}>
+                  <div style={{
+                    width: '60px',
+                    height: '60px',
+                    margin: '0 auto 12px',
+                    backgroundColor: currentUserPayment.paid ? '#10b981' : '#f59e0b',
+                    borderRadius: '50%',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontSize: '24px',
+                    color: 'white'
+                  }}>
+                    {currentUserPayment.paid ? '✓' : '€'}
+                  </div>
+
+                  <h5 style={{
+                    color: '#1f2937',
+                    fontSize: '18px',
+                    fontWeight: '700',
+                    marginBottom: '8px'
+                  }}>
+                    {currentUserPayment.paid ? '✅ PAGADO' : '⏳ PENDIENTE'}
+                  </h5>
+
+                  <div style={{
+                    fontSize: '24px',
+                    fontWeight: '700',
+                    color: '#1f2937',
+                    marginBottom: '8px'
+                  }}>
+                    {sharePerPerson.toFixed(2)} €
+                  </div>
+
+                  <p style={{
+                    color: '#6b7280',
+                    fontSize: '14px',
+                    margin: 0
+                  }}>
+                    Tu parte de {totalPrice.toFixed(2)} € entre {paymentParticipants.length} personas
+                  </p>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    // VISTA PARA EL PROPIETARIO (ve toda la información)
     return (
       <div className="dialog-content" style={{ padding: '24px', flex: 1, overflowY: 'auto', background: 'white' }}>
         <div style={{ marginBottom: '20px' }}>
           <h4 style={{ color: '#1f2937', marginBottom: '16px', fontSize: '18px', fontWeight: '600' }}>
-            División de Gastos
+            División de Gastos - Gestión Completa
           </h4>
-
-          {/* Indicador de sincronización en tiempo real */}
-          <div style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '8px',
-            marginBottom: '16px',
-            padding: '8px 12px',
-            backgroundColor: '#f0f9ff',
-            borderRadius: '6px',
-            border: '1px solid #bae6fd'
-          }}>
-            <div style={{
-              width: '8px',
-              height: '8px',
-              backgroundColor: '#10b981',
-              borderRadius: '50%',
-              animation: 'pulse 2s infinite'
-            }}></div>
-            <span style={{ fontSize: '12px', color: '#0369a1' }}>
-              Sincronizado en tiempo real
-            </span>
-          </div>
 
           {!totalPrice ? (
             <div style={{ textAlign: 'center', padding: '20px', backgroundColor: '#f8fafc', borderRadius: '8px', border: '1px solid #e5e7eb' }}>
@@ -1753,7 +1814,7 @@ export function ShoppingList() {
             </div>
           ) : (
             <>
-              {/* Resumen de gastos */}
+              {/* Resumen de gastos COMPLETO para propietario */}
               <div style={{
                 backgroundColor: '#f8fafc',
                 padding: '16px',
@@ -1813,7 +1874,7 @@ export function ShoppingList() {
                   </div>
                 </div>
 
-                {/* Resumen de pagos */}
+                {/* Resumen de pagos DETALLADO para propietario */}
                 <div style={{
                   display: 'grid',
                   gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
@@ -1852,32 +1913,30 @@ export function ShoppingList() {
                 </div>
               </div>
 
-              {/* Participantes en la división de gastos */}
+              {/* Participantes en la división de gastos - VISTA COMPLETA DEL PROPIETARIO */}
               <div style={{ marginBottom: '20px' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
                   <h5 style={{ color: '#374151', fontSize: '16px', fontWeight: '600' }}>
-                    En división de gastos ({paymentParticipants.length})
+                    Gestión de Participantes ({paymentParticipants.length})
                   </h5>
-                  {isOwner && (
-                    <button
-                      onClick={() => {
-                        const email = prompt("Introduce el email para añadir a la división de gastos:");
-                        if (email) addToPaymentSplit(email);
-                      }}
-                      style={{
-                        backgroundColor: '#3b82f6',
-                        color: 'white',
-                        border: 'none',
-                        padding: '6px 12px',
-                        borderRadius: '6px',
-                        cursor: 'pointer',
-                        fontSize: '12px',
-                        fontWeight: '500'
-                      }}
-                    >
-                      + Añadir
-                    </button>
-                  )}
+                  <button
+                    onClick={() => {
+                      const email = prompt("Introduce el email para añadir a la división de gastos:");
+                      if (email) addToPaymentSplit(email);
+                    }}
+                    style={{
+                      backgroundColor: '#3b82f6',
+                      color: 'white',
+                      border: 'none',
+                      padding: '6px 12px',
+                      borderRadius: '6px',
+                      cursor: 'pointer',
+                      fontSize: '12px',
+                      fontWeight: '500'
+                    }}
+                  >
+                    + Añadir
+                  </button>
                 </div>
 
                 <div style={{ maxHeight: '200px', overflowY: 'auto' }}>
@@ -1895,7 +1954,7 @@ export function ShoppingList() {
                     >
                       <div style={{ flex: 1 }}>
                         <div style={{ fontWeight: '500', color: '#1f2937' }}>
-                          {participant.name}
+                          {participant.name} {participant.isOwner && '(Tú)'}
                         </div>
                         <div style={{ fontSize: '12px', color: '#6b7280' }}>
                           {sharePerPerson.toFixed(2)} € • {participant.email}
@@ -1904,38 +1963,25 @@ export function ShoppingList() {
 
                       <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                         {/* Toggle de pago - Solo propietario puede cambiar */}
-                        {isOwner ? (
-                          <button
-                            onClick={() => savePaymentStatus(participant.email, !payments[participant.email]?.paid)}
-                            style={{
-                              backgroundColor: payments[participant.email]?.paid ? '#10b981' : '#ef4444',
-                              color: 'white',
-                              border: 'none',
-                              padding: '6px 12px',
-                              borderRadius: '6px',
-                              cursor: 'pointer',
-                              fontSize: '12px',
-                              fontWeight: '500',
-                              minWidth: '80px'
-                            }}
-                          >
-                            {payments[participant.email]?.paid ? '✅ Pagado' : '❌ Pendiente'}
-                          </button>
-                        ) : (
-                          <span style={{
-                            color: payments[participant.email]?.paid ? '#10b981' : '#ef4444',
+                        <button
+                          onClick={() => savePaymentStatus(participant.email, !payments[participant.email]?.paid)}
+                          style={{
+                            backgroundColor: payments[participant.email]?.paid ? '#10b981' : '#ef4444',
+                            color: 'white',
+                            border: 'none',
+                            padding: '6px 12px',
+                            borderRadius: '6px',
+                            cursor: 'pointer',
                             fontSize: '12px',
                             fontWeight: '500',
-                            minWidth: '80px',
-                            textAlign: 'center',
-                            display: 'inline-block'
-                          }}>
-                            {payments[participant.email]?.paid ? '✅ Pagado' : '❌ Pendiente'}
-                          </span>
-                        )}
+                            minWidth: '80px'
+                          }}
+                        >
+                          {payments[participant.email]?.paid ? '✅ Pagado' : '❌ Pendiente'}
+                        </button>
 
-                        {/* Botón eliminar SOLO de la división (solo propietario para no propietarios) */}
-                        {isOwner && !participant.isOwner && (
+                        {/* Botón eliminar SOLO de la división (solo para no propietarios) */}
+                        {!participant.isOwner && (
                           <button
                             onClick={() => removeFromPaymentSplit(participant.email)}
                             style={{
@@ -1959,7 +2005,7 @@ export function ShoppingList() {
               </div>
 
               {/* Participantes excluidos de la división (solo visible para propietarios) */}
-              {isOwner && excludedParticipants.length > 0 && (
+              {excludedParticipants.length > 0 && (
                 <div style={{ marginBottom: '20px' }}>
                   <h5 style={{ color: '#374151', fontSize: '16px', fontWeight: '600', marginBottom: '12px' }}>
                     Excluidos de la división ({excludedParticipants.length})
@@ -2006,25 +2052,24 @@ export function ShoppingList() {
                 </div>
               )}
 
-              {/* Información para no propietarios */}
-              {!isOwner && (
-                <div style={{
-                  marginTop: '16px',
-                  padding: '12px',
-                  backgroundColor: '#fef3c7',
-                  borderRadius: '6px',
-                  border: '1px solid #fde68a'
+              {/* Información de gestión para propietarios */}
+              <div style={{
+                marginTop: '16px',
+                padding: '12px',
+                backgroundColor: '#dbeafe',
+                borderRadius: '6px',
+                border: '1px solid #93c5fd'
+              }}>
+                <p style={{
+                  color: '#1e40af',
+                  margin: 0,
+                  fontSize: '13px',
+                  lineHeight: '1.4'
                 }}>
-                  <p style={{
-                    color: '#92400e',
-                    margin: 0,
-                    fontSize: '13px',
-                    lineHeight: '1.4'
-                  }}>
-                    <strong>Solo el propietario</strong> puede gestionar pagos y participantes de la división.
-                  </p>
-                </div>
-              )}
+                  <strong>Eres el propietario</strong> - Puedes gestionar todos los pagos y participantes de la división.
+                  Los demás usuarios solo verán su información personal.
+                </p>
+              </div>
             </>
           )}
         </div>
