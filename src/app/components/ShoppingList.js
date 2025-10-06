@@ -36,6 +36,9 @@ export function ShoppingList() {
   const [finalizeDialogOpen, setFinalizeDialogOpen] = useState(false); // Diálogo finalizar compra
   const [splitDialogOpen, setSplitDialogOpen] = useState(false); // Diálogo dividir gastos
   const [editingObservations, setEditingObservations] = useState(false); // Modo edición observaciones
+  const [expenseParticipants, setExpenseParticipants] = useState([]);
+  const [paymentStatus, setPaymentStatus] = useState({});
+  const [customShares, setCustomShares] = useState({});
 
   // Referencias para cache
   const itemsCache = useRef({});
@@ -881,136 +884,147 @@ export function ShoppingList() {
     return unsubscribe;
   }, [currentList]);
 
-  // Función para crear lista - wrapper
-  const handleCreateList = async (listName) => {
-    try {
-      if (!listName.trim()) return;
-
-      await createElegantList(listName);
-    } catch (err) {
-      setError(`Error al crear lista: ${err.message}`);
-      showToast(`Error al crear lista: ${err.message}`, 'error');
+  useEffect(() => {
+    if (splitDialogOpen && currentList) {
+      loadExpenseParticipants(currentList);
     }
-  };
+  }, [splitDialogOpen, currentList]);
 
-  // Función para añadir item - wrapper
-  const handleAddItem = async (itemText) => {
-    try {
-      if (!itemText.trim()) return;
+  // Componente mejorado para el diálogo de división de gastos
+  const EnhancedSplitDialogContent = () => {
+    const [newParticipantEmail, setNewParticipantEmail] = useState('');
+    const [addingParticipant, setAddingParticipant] = useState(false);
 
-      await addElegantItem(itemText);
-    } catch (err) {
-      setError(`Error al añadir producto: ${err.message}`);
-      showToast(`Error al añadir producto: ${err.message}`, 'error');
-    }
-  };
+    const distribution = calculateExpenseDistribution();
+    const isListOwner = isCurrentListOwned();
 
-  // Funciones auxiliares
-  const allLists = [...lists, ...sharedLists];
+    const handleAddParticipant = async () => {
+      if (!newParticipantEmail.trim()) return;
 
-  const getCurrentListName = () => {
-    const list = allLists.find(list => list.id === currentList);
-    if (!list) return "";
-
-    if (sharedLists.some(sharedList => sharedList.id === currentList)) {
-      return `${list.name} (de ${list.ownerEmail?.split('@')[0] || 'Usuario'})`;
-    }
-
-    return list.name;
-  };
-
-  // Verificar si el usuario actual es el propietario de la lista actual
-  const isCurrentListOwned = () => {
-    return lists.some(list => list.id === currentList);
-  };
-
-  // Función para verificar si el usuario actual puede modificar la lista
-  const canUserModifyList = () => {
-    if (!currentList) return false;
-
-    // El dueño siempre puede modificar
-    if (isCurrentListOwned()) return true;
-
-    // Los usuarios con listas compartidas pueden modificar
-    if (isCurrentListShared()) return true;
-
-    return false;
-  };
-
-  // Verificar si la lista actual es compartida con el usuario
-  const isCurrentListShared = () => {
-    return sharedLists.some(list => list.id === currentList);
-  };
-
-  const isCurrentListSharedByMe = () => {
-    const currentListData = lists.find(list => list.id === currentList);
-    return currentListData && currentListData.sharedWith && currentListData.sharedWith.length > 0;
-  };
-
-  const isValidEmail = (email) => {
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    return emailRegex.test(email);
-  };
-
-  const checkUserExists = async (email) => {
-    try {
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-      if (!emailRegex.test(email)) {
-        return false;
+      setAddingParticipant(true);
+      try {
+        await addParticipant(newParticipantEmail);
+        setNewParticipantEmail('');
+      } catch (error) {
+        // El error ya se maneja en addParticipant
+      } finally {
+        setAddingParticipant(false);
       }
-      return true;
-    } catch (error) {
-      return true;
-    }
-  };
+    };
 
-  // Ordenar items: pendientes primero, luego por categoría y texto
-  const sortedItems = [...items].sort((a, b) => {
-    if (a.completed !== b.completed) {
-      return a.completed ? 1 : -1;
-    }
-    if (a.category !== b.category) {
-      return (a.category || "OTHER").localeCompare(b.category || "OTHER");
-    }
-    return a.text.localeCompare(b.text);
-  });
+    // Función para crear lista - wrapper
+    const handleCreateList = async (listName) => {
+      try {
+        if (!listName.trim()) return;
+
+        await createElegantList(listName);
+      } catch (err) {
+        setError(`Error al crear lista: ${err.message}`);
+        showToast(`Error al crear lista: ${err.message}`, 'error');
+      }
+    };
+
+    // Función para añadir item - wrapper
+    const handleAddItem = async (itemText) => {
+      try {
+        if (!itemText.trim()) return;
+
+        await addElegantItem(itemText);
+      } catch (err) {
+        setError(`Error al añadir producto: ${err.message}`);
+        showToast(`Error al añadir producto: ${err.message}`, 'error');
+      }
+    };
+
+    // Funciones auxiliares
+    const allLists = [...lists, ...sharedLists];
+
+    const getCurrentListName = () => {
+      const list = allLists.find(list => list.id === currentList);
+      if (!list) return "";
+
+      if (sharedLists.some(sharedList => sharedList.id === currentList)) {
+        return `${list.name} (de ${list.ownerEmail?.split('@')[0] || 'Usuario'})`;
+      }
+
+      return list.name;
+    };
+
+    // Verificar si el usuario actual es el propietario de la lista actual
+    const isCurrentListOwned = () => {
+      return lists.some(list => list.id === currentList);
+    };
+
+    // Función para verificar si el usuario actual puede modificar la lista
+    const canUserModifyList = () => {
+      if (!currentList) return false;
+
+      // El dueño siempre puede modificar
+      if (isCurrentListOwned()) return true;
+
+      // Los usuarios con listas compartidas pueden modificar
+      if (isCurrentListShared()) return true;
+
+      return false;
+    };
+
+    // Verificar si la lista actual es compartida con el usuario
+    const isCurrentListShared = () => {
+      return sharedLists.some(list => list.id === currentList);
+    };
+
+    const isCurrentListSharedByMe = () => {
+      const currentListData = lists.find(list => list.id === currentList);
+      return currentListData && currentListData.sharedWith && currentListData.sharedWith.length > 0;
+    };
+
+    const isValidEmail = (email) => {
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      return emailRegex.test(email);
+    };
+
+    const checkUserExists = async (email) => {
+      try {
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if (!emailRegex.test(email)) {
+          return false;
+        }
+        return true;
+      } catch (error) {
+        return true;
+      }
+    };
+
+    // Ordenar items: pendientes primero, luego por categoría y texto
+    const sortedItems = [...items].sort((a, b) => {
+      if (a.completed !== b.completed) {
+        return a.completed ? 1 : -1;
+      }
+      if (a.category !== b.category) {
+        return (a.category || "OTHER").localeCompare(b.category || "OTHER");
+      }
+      return a.text.localeCompare(b.text);
+    });
 
 
-  // Componente para la sección de información de la lista
-  const ListInfoSection = () => {
-    if (!currentList) return null;
+    // Componente para la sección de información de la lista
+    const ListInfoSection = () => {
+      if (!currentList) return null;
 
-    const currentObservations = listObservations[currentList] || "";
-    const currentPurchaseInfo = purchaseInfo[currentList];
-    const isSharedList = isCurrentListShared() || isCurrentListSharedByMe();
+      const currentObservations = listObservations[currentList] || "";
+      const currentPurchaseInfo = purchaseInfo[currentList];
+      const isSharedList = isCurrentListShared() || isCurrentListSharedByMe();
 
-    return (
-      <div className="list-info-section" style={{ marginBottom: "3%" }}>
-        <div className="list-info-header">
-          <h4 style={{ color: "black" }}>Información de la Lista</h4>
-          <div className="list-info-actions">
-            <button
-              onClick={() => setObservationsDialogOpen(true)}
-              className="action-btn"
-              title="Observaciones"
-              style={{
-                padding: "8px",
-                borderRadius: "8px",
-                border: "1px solid #e2e8f0",
-                background: "white",
-                cursor: "pointer"
-              }}
-            >
-              <FileText size={24} /> {/* más grande */}
-            </button>
-
-            {/* Botón de Dividir Gastos - solo visible en listas compartidas */}
-            {isSharedList && (
+      return (
+        <div className="list-info-section" style={{ marginBottom: "3%" }}>
+          <div className="list-info-header">
+            <h4 style={{ color: "black" }}>Información de la Lista</h4>
+            <div className="list-info-actions">
               <button
-                onClick={() => setSplitDialogOpen(true)}
+                onClick={() => setObservationsDialogOpen(true)}
                 className="action-btn"
-                title="Dividir Gastos"
+                title="Observaciones"
                 style={{
                   padding: "8px",
                   borderRadius: "8px",
@@ -1019,520 +1033,692 @@ export function ShoppingList() {
                   cursor: "pointer"
                 }}
               >
-                <Users size={24} />
+                <FileText size={24} /> {/* más grande */}
               </button>
-            )}
 
-            <button
-              onClick={() => setFinalizeDialogOpen(true)}
-              className="action-btn"
-              title="Finalizar Compra"
-              style={{
-                padding: "8px",
-                borderRadius: "8px",
-                border: "1px solid #e2e8f0",
-                background: "white",
-                cursor: "pointer"
-              }}
-            >
-              <ShoppingCart size={24} />
-            </button>
-          </div>
-        </div>
-
-        {/* Muestra el precio total si existe */}
-        {currentPurchaseInfo?.totalPrice && (
-          <div className="total-price-info" style={{ marginBottom: "12px" }}>
-            <strong style={{ color: "black" }}>Precio total: </strong>
-            <span style={{
-              color: "#10B981",
-              fontWeight: "bold",
-              fontSize: "16px"
-            }}>
-              {currentPurchaseInfo.totalPrice.toFixed(2)} €
-            </span>
-          </div>
-        )}
-
-        {currentObservations && (
-          <div className="observations-preview">
-            <strong style={{ color: "black" }}>Observaciones:</strong>
-            <p style={{ color: "black" }}>{currentObservations.length > 100
-              ? currentObservations.substring(0, 100) + "..."
-              : currentObservations}</p>
-          </div>
-        )}
-      </div>
-    );
-  };
-
-  // Agrupar items por categoría para mostrar organizadamente
-  const groupItemsByCategory = (itemsList) => {
-    const grouped = {};
-
-    itemsList.forEach(item => {
-      const category = item.category || "OTHER";
-      if (!grouped[category]) {
-        grouped[category] = [];
-      }
-      grouped[category].push(item);
-    });
-
-    return grouped;
-  };
-
-  const pendingItems = sortedItems.filter(item => !item.completed);
-  const completedItems = sortedItems.filter(item => item.completed);
-  const groupedPendingItems = groupItemsByCategory(pendingItems);
-
-
-
-  // Componente elegante para renderizar items individuales 
-  const ElegantItem = ({ item }) => {
-    const isSharedList = isCurrentListShared() || isCurrentListSharedByMe();
-
-    // Calcular categoryInfo dinámicamente basado en la categoría del item
-    const categoryInfo = getCategoryInfo(item.category || "OTHER");
-
-    return (
-      <li className="elegant-item" style={{
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        padding: '12px 16px',
-        marginBottom: '8px',
-        borderRadius: '12px',
-        backgroundColor: 'white',
-        boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
-        borderLeft: `4px solid ${categoryInfo.color}`,
-        transition: 'all 0.3s ease',
-        opacity: item.completed ? 0.7 : 1
-      }}>
-        <div className="item-content" style={{ display: 'flex', alignItems: 'center', gap: '12px', flex: 1 }}>
-          <div className="category-indicator" style={{
-            width: '24px',
-            height: '24px',
-            borderRadius: '50%',
-            backgroundColor: categoryInfo.color,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            fontSize: '12px'
-          }}>
-            {categoryInfo.icon}
-          </div>
-
-          <input
-            type="checkbox"
-            checked={item.completed}
-            onChange={(e) => {
-              e.stopPropagation();
-              toggleItemCompletion(item.id, item.completed);
-            }}
-            className="elegant-checkbox"
-            style={{
-              width: '20px',
-              height: '20px',
-              accentColor: '#10B981',
-              cursor: loading ? 'not-allowed' : 'pointer'
-            }}
-            disabled={loading}
-          />
-
-          <div className="item-text-container" style={{ flex: 1 }}>
-            <span
-              className="item-text"
-              style={{
-                fontSize: '16px',
-                fontWeight: '500',
-                color: item.completed ? '#9CA3AF' : '#374151',
-                textDecoration: item.completed ? 'line-through' : 'none',
-                display: 'block'
-              }}
-            >
-              {item.text}
-              {item.isOptimistic && (
-                <span style={{
-                  fontSize: '12px',
-                  color: '#6B7280',
-                  marginLeft: '8px',
-                  fontStyle: 'italic'
-                }}>
-                  (guardando...)
-                </span>
+              {/* Botón de Dividir Gastos - solo visible en listas compartidas */}
+              {isSharedList && (
+                <button
+                  onClick={() => setSplitDialogOpen(true)}
+                  className="action-btn"
+                  title="Dividir Gastos"
+                  style={{
+                    padding: "8px",
+                    borderRadius: "8px",
+                    border: "1px solid #e2e8f0",
+                    background: "white",
+                    cursor: "pointer"
+                  }}
+                >
+                  <Users size={24} />
+                </button>
               )}
-            </span>
 
-            {/* INFORMACIÓN DE QUIÉN AÑADIÓ Y QUIÉN COMPRÓ - SOLO EN LISTAS COMPARTIDAS */}
-            {isSharedList && (
-              <div className="item-metadata" style={{
-                fontSize: '12px',
-                color: '#6B7280',
-                marginTop: '4px'
-              }}>
-                <span className="added-by-info">
-                  Añadido por: {item.addedBy?.split('@')[0] || 'Usuario'}
-                </span>
-                {item.completed && item.purchasedBy && (
-                  <span className="purchaser-info" style={{ marginLeft: '12px' }}>
-                    • Comprado por: {item.purchasedBy?.split('@')[0] || 'Usuario'}
-                  </span>
-                )}
-              </div>
-            )}
-          </div>
-        </div>
-
-        <div className="item-actions" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          {/* PERMITIR ELIMINAR ITEMS A TODOS LOS USUARIOS CON ACCESO A LA LISTA */}
-          {currentList && ( // Solo mostrar si hay una lista seleccionada
-            <button
-              onClick={() => setConfirmDelete(item)}
-              disabled={loading || item.isOptimistic}
-              className="elegant-delete-btn"
-              style={{
-                background: 'none',
-                border: 'none',
-                cursor: loading || item.isOptimistic ? 'not-allowed' : 'pointer',
-                padding: '4px',
-                borderRadius: '4px',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                opacity: loading || item.isOptimistic ? 0.5 : 1
-              }}
-              title="Eliminar producto"
-            >
-              <svg
-                width="18"
-                height="18"
-                viewBox="0 0 24 24"
-                fill="none"
-                xmlns="http://www.w3.org/2000/svg"
-                style={{ color: '#EF4444' }}
+              <button
+                onClick={() => setFinalizeDialogOpen(true)}
+                className="action-btn"
+                title="Finalizar Compra"
+                style={{
+                  padding: "8px",
+                  borderRadius: "8px",
+                  border: "1px solid #e2e8f0",
+                  background: "white",
+                  cursor: "pointer"
+                }}
               >
-                <path
-                  d="M19 7L18.1327 19.1425C18.0579 20.1891 17.187 21 16.1378 21H7.86224C6.81296 21 5.94208 20.1891 5.86732 19.1425L5 7M10 11V17M14 11V17M15 7V4C15 3.44772 14.5523 3 14 3H10C9.44772 3 9 3.44772 9 4V7M4 7H20"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
-            </button>
+                <ShoppingCart size={24} />
+              </button>
+            </div>
+          </div>
+
+          {/* Muestra el precio total si existe */}
+          {currentPurchaseInfo?.totalPrice && (
+            <div className="total-price-info" style={{ marginBottom: "12px" }}>
+              <strong style={{ color: "black" }}>Precio total: </strong>
+              <span style={{
+                color: "#10B981",
+                fontWeight: "bold",
+                fontSize: "16px"
+              }}>
+                {currentPurchaseInfo.totalPrice.toFixed(2)} €
+              </span>
+            </div>
+          )}
+
+          {currentObservations && (
+            <div className="observations-preview">
+              <strong style={{ color: "black" }}>Observaciones:</strong>
+              <p style={{ color: "black" }}>{currentObservations.length > 100
+                ? currentObservations.substring(0, 100) + "..."
+                : currentObservations}</p>
+            </div>
           )}
         </div>
-      </li>
-    );
-  };
+      );
+    };
 
-  // Componente para crear listas
-  const ElegantListCreator = () => {
-    const [localListName, setLocalListName] = useState("");
+    // Agrupar items por categoría para mostrar organizadamente
+    const groupItemsByCategory = (itemsList) => {
+      const grouped = {};
 
-    const handleCreate = async () => {
-      if (!localListName.trim()) return;
+      itemsList.forEach(item => {
+        const category = item.category || "OTHER";
+        if (!grouped[category]) {
+          grouped[category] = [];
+        }
+        grouped[category].push(item);
+      });
+
+      return grouped;
+    };
+
+    const pendingItems = sortedItems.filter(item => !item.completed);
+    const completedItems = sortedItems.filter(item => item.completed);
+    const groupedPendingItems = groupItemsByCategory(pendingItems);
+
+
+
+    const loadExpenseParticipants = (listId) => {
+      if (!listId) return;
+
+      const currentListData = allLists.find(list => list.id === listId);
+      if (!currentListData) return;
+
+      // Participantes: propietario + usuarios compartidos
+      const participants = [
+        {
+          email: currentListData.ownerEmail || auth.currentUser?.email,
+          name: (currentListData.ownerEmail || auth.currentUser?.email)?.split('@')[0] || 'Tú',
+          isOwner: true,
+          canRemove: false
+        },
+        ...(currentListData.sharedWith || []).map(email => ({
+          email,
+          name: email.split('@')[0],
+          isOwner: false,
+          canRemove: isCurrentListOwned() // Solo el dueño puede eliminar participantes
+        }))
+      ];
+
+      setExpenseParticipants(participants);
+
+      // Inicializar estados de pago y shares personalizados
+      const initialPaymentStatus = {};
+      const initialCustomShares = {};
+
+      participants.forEach(participant => {
+        initialPaymentStatus[participant.email] = false;
+        initialCustomShares[participant.email] = null; // null = share automático
+      });
+
+      setPaymentStatus(initialPaymentStatus);
+      setCustomShares(initialCustomShares);
+    };
+
+    // Función para añadir un nuevo participante
+    const addParticipant = async (email) => {
+      if (!email.trim() || !isValidEmail(email.trim())) {
+        showToast("Email inválido", 'error');
+        return;
+      }
+
+      if (expenseParticipants.some(p => p.email === email.trim().toLowerCase())) {
+        showToast("Este usuario ya es participante", 'warning');
+        return;
+      }
+
+      if (email.trim().toLowerCase() === auth.currentUser.email.toLowerCase()) {
+        showToast("No puedes añadirte a ti mismo", 'warning');
+        return;
+      }
 
       try {
-        await handleCreateList(localListName);
-        setLocalListName(""); // Limpiar solo si fue exitoso
+        // Verificar que el usuario existe
+        const userExists = await checkUserExists(email.trim());
+        if (!userExists) {
+          showToast("No se encontró un usuario con este email", 'error');
+          return;
+        }
+
+        // Compartir la lista con el nuevo usuario
+        await updateDoc(doc(db, "lists", currentList), {
+          sharedWith: arrayUnion(email.trim().toLowerCase())
+        });
+
+        // Actualizar participantes localmente
+        const newParticipant = {
+          email: email.trim().toLowerCase(),
+          name: email.trim().split('@')[0],
+          isOwner: false,
+          canRemove: true
+        };
+
+        setExpenseParticipants(prev => [...prev, newParticipant]);
+        setPaymentStatus(prev => ({ ...prev, [newParticipant.email]: false }));
+        setCustomShares(prev => ({ ...prev, [newParticipant.email]: null }));
+
+        showToast(`Usuario ${email} añadido a la lista`, 'success');
       } catch (error) {
-        // El error ya se maneja en handleCreateList
+        console.error("Error añadiendo participante:", error);
+        showToast("Error al añadir participante: " + error.message, 'error');
       }
     };
 
-    const handleKeyPress = (e) => {
-      if (e.key === 'Enter') {
-        handleCreate();
-      }
-    };
-
-    return (
-      <div className="elegant-list-creator" style={{
-        display: 'flex',
-        flexDirection: 'row',
-        gap: '12px',
-        marginBottom: '24px',
-        padding: '16px',
-        backgroundColor: '#F0F9FF',
-        borderRadius: '12px',
-        alignItems: 'stretch',
-        flexWrap: 'wrap'
-      }}>
-        <input
-          value={localListName}
-          onChange={(e) => setLocalListName(e.target.value)}
-          onKeyPress={handleKeyPress}
-          placeholder="Nombre de nueva lista..."
-          className="elegant-input"
-          style={{
-            flex: '1 1 200px',
-            minWidth: '0',
-            padding: '12px 16px',
-            border: '1px solid #D1D5DB',
-            borderRadius: '8px',
-            fontSize: '16px',
-            color: '#1F2937',
-            backgroundColor: 'white',
-            outline: 'none',
-            transition: 'all 0.2s',
-            boxSizing: 'border-box'
-          }}
-          onFocus={(e) => e.target.style.borderColor = '#3B82F6'}
-          onBlur={(e) => e.target.style.borderColor = '#D1D5DB'}
-        />
-        <button
-          onClick={handleCreate}
-          disabled={loading || !localListName.trim()}
-          className="elegant-create-btn"
-          style={{
-            flex: '0 0 auto',
-            padding: '12px 20px',
-            border: 'none',
-            borderRadius: '8px',
-            backgroundColor: !localListName.trim() ? '#9CA3AF' : '#3B82F6',
-            color: 'white',
-            fontSize: '16px',
-            fontWeight: '600',
-            cursor: !localListName.trim() ? 'not-allowed' : 'pointer',
-            transition: 'all 0.2s',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: '8px',
-            minWidth: '140px',
-            boxSizing: 'border-box'
-          }}
-          onMouseEnter={(e) => {
-            if (localListName.trim()) {
-              e.target.style.backgroundColor = '#2563EB';
-            }
-          }}
-          onMouseLeave={(e) => {
-            if (localListName.trim()) {
-              e.target.style.backgroundColor = '#3B82F6';
-            }
-          }}
-        >
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <path d="M12 4V20M4 12H20" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-          <span className="button-text">Crear Lista</span>
-        </button>
-      </div>
-    );
-  };
-
-  // Componente elegante para añadir items
-  const ElegantItemAdder = () => {
-    const [localItem, setLocalItem] = useState("");
-
-    // Verificar si el usuario puede añadir productos
-    const canAddItems = () => {
-      if (!currentList) return false;
-
-      // Si es dueño de la lista, siempre puede añadir
-      if (isCurrentListOwned()) return true;
-
-      // Si es una lista compartida con él, puede añadir
-      if (isCurrentListShared()) return true;
-
-      return false;
-    };
-
-    const handleAdd = async () => {
-      if (!localItem.trim() || !canAddItems()) return;
+    // Función para eliminar participante
+    const removeParticipant = async (email) => {
+      if (!email || !isCurrentListOwned()) return;
 
       try {
-        await handleAddItem(localItem);
-        setLocalItem("");
+        // Dejar de compartir la lista
+        await updateDoc(doc(db, "lists", currentList), {
+          sharedWith: arrayRemove(email)
+        });
+
+        // Actualizar participantes localmente
+        setExpenseParticipants(prev => prev.filter(p => p.email !== email));
+
+        // Limpiar estados
+        setPaymentStatus(prev => {
+          const newStatus = { ...prev };
+          delete newStatus[email];
+          return newStatus;
+        });
+
+        setCustomShares(prev => {
+          const newShares = { ...prev };
+          delete newShares[email];
+          return newShares;
+        });
+
+        showToast(`Usuario ${email} eliminado de la lista`, 'success');
       } catch (error) {
-        // El error ya se maneja en handleAddItem
+        console.error("Error eliminando participante:", error);
+        showToast("Error al eliminar participante: " + error.message, 'error');
       }
     };
 
-    const handleKeyPress = (e) => {
-      if (e.key === 'Enter' && canAddItems()) {
-        handleAdd();
+    // Función para calcular la distribución de gastos
+    const calculateExpenseDistribution = () => {
+      const currentPurchaseInfo = purchaseInfo[currentList];
+      const totalPrice = currentPurchaseInfo?.totalPrice;
+
+      if (!totalPrice) {
+        return {
+          totalPrice: 0,
+          shares: {},
+          totalPaid: 0,
+          remaining: 0,
+          isValid: false
+        };
       }
+
+      // Calcular shares personalizados o automáticos
+      let totalCustomShares = 0;
+      let autoParticipantsCount = 0;
+
+      expenseParticipants.forEach(participant => {
+        const customShare = customShares[participant.email];
+        if (customShare !== null && customShare !== undefined) {
+          totalCustomShares += customShare;
+        } else {
+          autoParticipantsCount++;
+        }
+      });
+
+      const remainingForAuto = totalPrice - totalCustomShares;
+
+      if (remainingForAuto < 0) {
+        showToast("La suma de shares personalizados excede el total", 'error');
+        return {
+          totalPrice,
+          shares: {},
+          totalPaid: 0,
+          remaining: totalPrice,
+          isValid: false
+        };
+      }
+
+      const autoShare = autoParticipantsCount > 0 ? remainingForAuto / autoParticipantsCount : 0;
+
+      // Calcular shares finales
+      const shares = {};
+      let calculatedTotal = 0;
+
+      expenseParticipants.forEach(participant => {
+        const customShare = customShares[participant.email];
+        const share = customShare !== null && customShare !== undefined ? customShare : autoShare;
+        shares[participant.email] = {
+          amount: share,
+          isCustom: customShare !== null && customShare !== undefined,
+          paid: paymentStatus[participant.email] || false
+        };
+        calculatedTotal += share;
+      });
+
+      // Verificar que la suma sea correcta (evitar errores de redondeo)
+      const difference = Math.abs(calculatedTotal - totalPrice);
+      if (difference > 0.01) {
+        // Ajustar el share del primer participante para compensar la diferencia
+        const firstParticipant = expenseParticipants[0];
+        if (firstParticipant) {
+          shares[firstParticipant.email].amount += (totalPrice - calculatedTotal);
+        }
+      }
+
+      const totalPaid = expenseParticipants.reduce((sum, participant) => {
+        return sum + (paymentStatus[participant.email] ? shares[participant.email].amount : 0);
+      }, 0);
+
+      return {
+        totalPrice,
+        shares,
+        totalPaid,
+        remaining: totalPrice - totalPaid,
+        isValid: true
+      };
     };
 
-    const canAdd = canAddItems();
+    // Función para marcar/desmarcar pago
+    const togglePaymentStatus = (email) => {
+      setPaymentStatus(prev => ({
+        ...prev,
+        [email]: !prev[email]
+      }));
+    };
 
-    return (
-      <div className="elegant-item-adder" style={{
-        display: 'flex',
-        flexDirection: 'row',
-        gap: '12px',
-        marginBottom: '20px',
-        alignItems: 'stretch',
-        flexWrap: 'wrap'
-      }}>
-        <input
-          value={localItem}
-          onChange={(e) => setLocalItem(e.target.value)}
-          onKeyPress={handleKeyPress}
-          placeholder={canAdd ? "Añadir nuevo producto..." : "No tienes permisos para añadir productos"}
-          className="elegant-input"
-          style={{
-            flex: '1 1 200px',
-            minWidth: '0',
-            padding: '12px 16px',
-            border: `1px solid ${canAdd ? '#D1D5DB' : '#FECACA'}`,
-            borderRadius: '8px',
-            fontSize: '16px',
-            color: canAdd ? '#1F2937' : '#6B7280',
-            backgroundColor: canAdd ? 'white' : '#FEF2F2',
-            outline: 'none',
-            transition: 'all 0.2s',
-            boxSizing: 'border-box',
-            cursor: canAdd ? 'text' : 'not-allowed'
-          }}
-          onFocus={(e) => canAdd && (e.target.style.borderColor = '#3B82F6')}
-          onBlur={(e) => canAdd && (e.target.style.borderColor = '#D1D5DB')}
-          disabled={!canAdd}
-        />
-        <button
-          onClick={handleAdd}
-          disabled={!localItem.trim() || !canAdd}
-          className="elegant-add-btn"
-          style={{
-            flex: '0 0 auto',
-            padding: '12px 20px',
-            border: 'none',
-            borderRadius: '8px',
-            backgroundColor: !localItem.trim() || !canAdd ? '#9CA3AF' : '#10B981',
-            color: 'white',
-            fontSize: '16px',
-            fontWeight: '600',
-            cursor: !localItem.trim() || !canAdd ? 'not-allowed' : 'pointer',
-            transition: 'all 0.2s',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: '8px',
-            minWidth: '120px',
-            boxSizing: 'border-box'
-          }}
-          onMouseEnter={(e) => {
-            if (localItem.trim() && canAdd) {
-              e.target.style.backgroundColor = '#059669';
-            }
-          }}
-          onMouseLeave={(e) => {
-            if (localItem.trim() && canAdd) {
-              e.target.style.backgroundColor = '#10B981';
-            }
-          }}
-          title={!canAdd ? "No tienes permisos para añadir productos a esta lista" : "Añadir producto"}
-        >
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <path d="M12 4V20M4 12H20" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-          <span className="button-text">Añadir</span>
-        </button>
-      </div>
-    );
-  };
+    // Función para actualizar share personalizado
+    const updateCustomShare = (email, value) => {
+      const numericValue = value === '' ? null : parseFloat(value);
+      setCustomShares(prev => ({
+        ...prev,
+        [email]: numericValue
+      }));
+    };
 
-  // Componente para el contenido del diálogo de división de gastos
-  const SplitDialogContent = () => {
-    // Verificar si es una lista compartida
-    const isSharedList = isCurrentListShared() || isCurrentListSharedByMe();
+    // Función para resetear share personalizado
+    const resetCustomShare = (email) => {
+      setCustomShares(prev => ({
+        ...prev,
+        [email]: null
+      }));
+    }
 
-    if (!isSharedList) {
+
+    // Componente elegante para renderizar items individuales 
+    const ElegantItem = ({ item }) => {
+      const isSharedList = isCurrentListShared() || isCurrentListSharedByMe();
+
+      // Calcular categoryInfo dinámicamente basado en la categoría del item
+      const categoryInfo = getCategoryInfo(item.category || "OTHER");
+
       return (
-        <div className="dialog-content" style={{
-          padding: '24px',
-          flex: 1,
-          overflowY: 'auto',
-          background: 'white'
+        <li className="elegant-item" style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          padding: '12px 16px',
+          marginBottom: '8px',
+          borderRadius: '12px',
+          backgroundColor: 'white',
+          boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
+          borderLeft: `4px solid ${categoryInfo.color}`,
+          transition: 'all 0.3s ease',
+          opacity: item.completed ? 0.7 : 1
         }}>
-          <div style={{ textAlign: 'center', padding: '20px' }}>
-            <div style={{
-              width: '64px',
-              height: '64px',
-              margin: '0 auto 16px',
-              backgroundColor: '#f3f4f6',
+          <div className="item-content" style={{ display: 'flex', alignItems: 'center', gap: '12px', flex: 1 }}>
+            <div className="category-indicator" style={{
+              width: '24px',
+              height: '24px',
               borderRadius: '50%',
+              backgroundColor: categoryInfo.color,
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              fontSize: '24px',
-              color: '#6b7280'
+              fontSize: '12px'
             }}>
-              👥
+              {categoryInfo.icon}
             </div>
-            <p style={{
-              color: '#374151',
-              marginBottom: '8px',
-              fontSize: '16px',
-              fontWeight: '500'
-            }}>
-              Solo disponible para listas compartidas
-            </p>
-            <p style={{
-              color: '#6b7280',
-              fontSize: '14px',
-              lineHeight: '1.5'
-            }}>
-              Esta función está disponible solo para listas que has compartido o que han sido compartidas contigo.
-            </p>
+
+            <input
+              type="checkbox"
+              checked={item.completed}
+              onChange={(e) => {
+                e.stopPropagation();
+                toggleItemCompletion(item.id, item.completed);
+              }}
+              className="elegant-checkbox"
+              style={{
+                width: '20px',
+                height: '20px',
+                accentColor: '#10B981',
+                cursor: loading ? 'not-allowed' : 'pointer'
+              }}
+              disabled={loading}
+            />
+
+            <div className="item-text-container" style={{ flex: 1 }}>
+              <span
+                className="item-text"
+                style={{
+                  fontSize: '16px',
+                  fontWeight: '500',
+                  color: item.completed ? '#9CA3AF' : '#374151',
+                  textDecoration: item.completed ? 'line-through' : 'none',
+                  display: 'block'
+                }}
+              >
+                {item.text}
+                {item.isOptimistic && (
+                  <span style={{
+                    fontSize: '12px',
+                    color: '#6B7280',
+                    marginLeft: '8px',
+                    fontStyle: 'italic'
+                  }}>
+                    (guardando...)
+                  </span>
+                )}
+              </span>
+
+              {/* INFORMACIÓN DE QUIÉN AÑADIÓ Y QUIÉN COMPRÓ - SOLO EN LISTAS COMPARTIDAS */}
+              {isSharedList && (
+                <div className="item-metadata" style={{
+                  fontSize: '12px',
+                  color: '#6B7280',
+                  marginTop: '4px'
+                }}>
+                  <span className="added-by-info">
+                    Añadido por: {item.addedBy?.split('@')[0] || 'Usuario'}
+                  </span>
+                  {item.completed && item.purchasedBy && (
+                    <span className="purchaser-info" style={{ marginLeft: '12px' }}>
+                      • Comprado por: {item.purchasedBy?.split('@')[0] || 'Usuario'}
+                    </span>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
+
+          <div className="item-actions" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            {/* PERMITIR ELIMINAR ITEMS A TODOS LOS USUARIOS CON ACCESO A LA LISTA */}
+            {currentList && ( // Solo mostrar si hay una lista seleccionada
+              <button
+                onClick={() => setConfirmDelete(item)}
+                disabled={loading || item.isOptimistic}
+                className="elegant-delete-btn"
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  cursor: loading || item.isOptimistic ? 'not-allowed' : 'pointer',
+                  padding: '4px',
+                  borderRadius: '4px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  opacity: loading || item.isOptimistic ? 0.5 : 1
+                }}
+                title="Eliminar producto"
+              >
+                <svg
+                  width="18"
+                  height="18"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  xmlns="http://www.w3.org/2000/svg"
+                  style={{ color: '#EF4444' }}
+                >
+                  <path
+                    d="M19 7L18.1327 19.1425C18.0579 20.1891 17.187 21 16.1378 21H7.86224C6.81296 21 5.94208 20.1891 5.86732 19.1425L5 7M10 11V17M14 11V17M15 7V4C15 3.44772 14.5523 3 14 3H10C9.44772 3 9 3.44772 9 4V7M4 7H20"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+              </button>
+            )}
+          </div>
+        </li>
+      );
+    };
+
+    // Componente para crear listas
+    const ElegantListCreator = () => {
+      const [localListName, setLocalListName] = useState("");
+
+      const handleCreate = async () => {
+        if (!localListName.trim()) return;
+
+        try {
+          await handleCreateList(localListName);
+          setLocalListName(""); // Limpiar solo si fue exitoso
+        } catch (error) {
+          // El error ya se maneja en handleCreateList
+        }
+      };
+
+      const handleKeyPress = (e) => {
+        if (e.key === 'Enter') {
+          handleCreate();
+        }
+      };
+
+      return (
+        <div className="elegant-list-creator" style={{
+          display: 'flex',
+          flexDirection: 'row',
+          gap: '12px',
+          marginBottom: '24px',
+          padding: '16px',
+          backgroundColor: '#F0F9FF',
+          borderRadius: '12px',
+          alignItems: 'stretch',
+          flexWrap: 'wrap'
+        }}>
+          <input
+            value={localListName}
+            onChange={(e) => setLocalListName(e.target.value)}
+            onKeyPress={handleKeyPress}
+            placeholder="Nombre de nueva lista..."
+            className="elegant-input"
+            style={{
+              flex: '1 1 200px',
+              minWidth: '0',
+              padding: '12px 16px',
+              border: '1px solid #D1D5DB',
+              borderRadius: '8px',
+              fontSize: '16px',
+              color: '#1F2937',
+              backgroundColor: 'white',
+              outline: 'none',
+              transition: 'all 0.2s',
+              boxSizing: 'border-box'
+            }}
+            onFocus={(e) => e.target.style.borderColor = '#3B82F6'}
+            onBlur={(e) => e.target.style.borderColor = '#D1D5DB'}
+          />
+          <button
+            onClick={handleCreate}
+            disabled={loading || !localListName.trim()}
+            className="elegant-create-btn"
+            style={{
+              flex: '0 0 auto',
+              padding: '12px 20px',
+              border: 'none',
+              borderRadius: '8px',
+              backgroundColor: !localListName.trim() ? '#9CA3AF' : '#3B82F6',
+              color: 'white',
+              fontSize: '16px',
+              fontWeight: '600',
+              cursor: !localListName.trim() ? 'not-allowed' : 'pointer',
+              transition: 'all 0.2s',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '8px',
+              minWidth: '140px',
+              boxSizing: 'border-box'
+            }}
+            onMouseEnter={(e) => {
+              if (localListName.trim()) {
+                e.target.style.backgroundColor = '#2563EB';
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (localListName.trim()) {
+                e.target.style.backgroundColor = '#3B82F6';
+              }
+            }}
+          >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M12 4V20M4 12H20" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+            <span className="button-text">Crear Lista</span>
+          </button>
         </div>
       );
-    }
+    };
 
-    const currentPurchaseInfo = purchaseInfo[currentList];
-    const totalPrice = currentPurchaseInfo?.totalPrice;
+    // Componente elegante para añadir items
+    const ElegantItemAdder = () => {
+      const [localItem, setLocalItem] = useState("");
 
-    // Obtener participantes: propietario + usuarios compartidos
-    const currentListData = allLists.find(list => list.id === currentList);
-    const participants = [
-      currentListData?.ownerEmail || auth.currentUser?.email || "Tú",
-      ...(currentListData?.sharedWith || [])
-    ];
+      // Verificar si el usuario puede añadir productos
+      const canAddItems = () => {
+        if (!currentList) return false;
 
-    // Calcular precio por persona
-    const sharePerPerson = totalPrice ? totalPrice / participants.length : 0;
+        // Si es dueño de la lista, siempre puede añadir
+        if (isCurrentListOwned()) return true;
 
-    return (
-      <div className="dialog-content" style={{
-        padding: '24px',
-        flex: 1,
-        overflowY: 'auto',
-        background: 'white'
-      }}>
-        <div style={{ marginBottom: '20px' }}>
-          <h4 style={{
-            color: '#1f2937',
-            marginBottom: '16px',
-            fontSize: '18px',
-            fontWeight: '600'
-          }}>
-          </h4>
+        // Si es una lista compartida con él, puede añadir
+        if (isCurrentListShared()) return true;
 
-          {!totalPrice ? (
-            <div style={{
-              textAlign: 'center',
-              padding: '20px',
-              backgroundColor: '#f8fafc',
+        return false;
+      };
+
+      const handleAdd = async () => {
+        if (!localItem.trim() || !canAddItems()) return;
+
+        try {
+          await handleAddItem(localItem);
+          setLocalItem("");
+        } catch (error) {
+          // El error ya se maneja en handleAddItem
+        }
+      };
+
+      const handleKeyPress = (e) => {
+        if (e.key === 'Enter' && canAddItems()) {
+          handleAdd();
+        }
+      };
+
+      const canAdd = canAddItems();
+
+      return (
+        <div className="elegant-item-adder" style={{
+          display: 'flex',
+          flexDirection: 'row',
+          gap: '12px',
+          marginBottom: '20px',
+          alignItems: 'stretch',
+          flexWrap: 'wrap'
+        }}>
+          <input
+            value={localItem}
+            onChange={(e) => setLocalItem(e.target.value)}
+            onKeyPress={handleKeyPress}
+            placeholder={canAdd ? "Añadir nuevo producto..." : "No tienes permisos para añadir productos"}
+            className="elegant-input"
+            style={{
+              flex: '1 1 200px',
+              minWidth: '0',
+              padding: '12px 16px',
+              border: `1px solid ${canAdd ? '#D1D5DB' : '#FECACA'}`,
               borderRadius: '8px',
-              border: '1px solid #e5e7eb'
-            }}>
+              fontSize: '16px',
+              color: canAdd ? '#1F2937' : '#6B7280',
+              backgroundColor: canAdd ? 'white' : '#FEF2F2',
+              outline: 'none',
+              transition: 'all 0.2s',
+              boxSizing: 'border-box',
+              cursor: canAdd ? 'text' : 'not-allowed'
+            }}
+            onFocus={(e) => canAdd && (e.target.style.borderColor = '#3B82F6')}
+            onBlur={(e) => canAdd && (e.target.style.borderColor = '#D1D5DB')}
+            disabled={!canAdd}
+          />
+          <button
+            onClick={handleAdd}
+            disabled={!localItem.trim() || !canAdd}
+            className="elegant-add-btn"
+            style={{
+              flex: '0 0 auto',
+              padding: '12px 20px',
+              border: 'none',
+              borderRadius: '8px',
+              backgroundColor: !localItem.trim() || !canAdd ? '#9CA3AF' : '#10B981',
+              color: 'white',
+              fontSize: '16px',
+              fontWeight: '600',
+              cursor: !localItem.trim() || !canAdd ? 'not-allowed' : 'pointer',
+              transition: 'all 0.2s',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '8px',
+              minWidth: '120px',
+              boxSizing: 'border-box'
+            }}
+            onMouseEnter={(e) => {
+              if (localItem.trim() && canAdd) {
+                e.target.style.backgroundColor = '#059669';
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (localItem.trim() && canAdd) {
+                e.target.style.backgroundColor = '#10B981';
+              }
+            }}
+            title={!canAdd ? "No tienes permisos para añadir productos a esta lista" : "Añadir producto"}
+          >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M12 4V20M4 12H20" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+            <span className="button-text">Añadir</span>
+          </button>
+        </div>
+      );
+    };
+
+    // Componente para el contenido del diálogo de división de gastos
+    const SplitDialogContent = () => {
+      // Verificar si es una lista compartida
+      const isSharedList = isCurrentListShared() || isCurrentListSharedByMe();
+
+      if (!isSharedList) {
+        return (
+          <div className="dialog-content" style={{
+            padding: '24px',
+            flex: 1,
+            overflowY: 'auto',
+            background: 'white'
+          }}>
+            <div style={{ textAlign: 'center', padding: '20px' }}>
               <div style={{
-                width: '48px',
-                height: '48px',
-                margin: '0 auto 12px',
+                width: '64px',
+                height: '64px',
+                margin: '0 auto 16px',
                 backgroundColor: '#f3f4f6',
                 borderRadius: '50%',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                fontSize: '20px',
+                fontSize: '24px',
                 color: '#6b7280'
               }}>
-                💰
+                👥
               </div>
               <p style={{
                 color: '#374151',
@@ -1540,664 +1726,786 @@ export function ShoppingList() {
                 fontSize: '16px',
                 fontWeight: '500'
               }}>
-                Precio total no establecido
+                Solo disponible para listas compartidas
               </p>
               <p style={{
                 color: '#6b7280',
                 fontSize: '14px',
-                lineHeight: '1.5',
-                marginBottom: '16px'
+                lineHeight: '1.5'
               }}>
-                Primero establece el precio total de la compra usando 'Finalizar Compra'
+                Esta función está disponible solo para listas que has compartido o que han sido compartidas contigo.
               </p>
-              <button
-                onClick={() => {
-                  setSplitDialogOpen(false);
-                  setFinalizeDialogOpen(true);
-                }}
-                className="blue-button"
-                style={{
-                  backgroundColor: '#3b82f6',
-                  color: 'white',
-                  border: 'none',
-                  padding: '8px 16px',
-                  borderRadius: '6px',
-                  cursor: 'pointer',
-                  fontWeight: '500',
-                  fontSize: '14px'
-                }}
-              >
-                Establecer Precio
-              </button>
             </div>
-          ) : (
-            <>
-              {/* Resumen de gastos */}
+          </div>
+        );
+      }
+
+      const currentPurchaseInfo = purchaseInfo[currentList];
+      const totalPrice = currentPurchaseInfo?.totalPrice;
+
+      // Obtener participantes: propietario + usuarios compartidos
+      const currentListData = allLists.find(list => list.id === currentList);
+      const participants = [
+        currentListData?.ownerEmail || auth.currentUser?.email || "Tú",
+        ...(currentListData?.sharedWith || [])
+      ];
+
+      // Calcular precio por persona
+      const sharePerPerson = totalPrice ? totalPrice / participants.length : 0;
+
+      return (
+        <div className="dialog-content" style={{
+          padding: '24px',
+          flex: 1,
+          overflowY: 'auto',
+          background: 'white'
+        }}>
+          <div style={{ marginBottom: '20px' }}>
+            <h4 style={{
+              color: '#1f2937',
+              marginBottom: '16px',
+              fontSize: '18px',
+              fontWeight: '600'
+            }}>
+            </h4>
+
+            {!totalPrice ? (
               <div style={{
+                textAlign: 'center',
+                padding: '20px',
                 backgroundColor: '#f8fafc',
-                padding: '16px',
                 borderRadius: '8px',
-                border: '1px solid #e5e7eb',
-                marginBottom: '20px'
+                border: '1px solid #e5e7eb'
               }}>
                 <div style={{
-                  display: 'grid',
-                  gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
-                  gap: '12px',
+                  width: '48px',
+                  height: '48px',
+                  margin: '0 auto 12px',
+                  backgroundColor: '#f3f4f6',
+                  borderRadius: '50%',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: '20px',
+                  color: '#6b7280'
+                }}>
+                  💰
+                </div>
+                <p style={{
+                  color: '#374151',
+                  marginBottom: '8px',
+                  fontSize: '16px',
+                  fontWeight: '500'
+                }}>
+                  Precio total no establecido
+                </p>
+                <p style={{
+                  color: '#6b7280',
+                  fontSize: '14px',
+                  lineHeight: '1.5',
                   marginBottom: '16px'
                 }}>
-                  <div style={{
-                    backgroundColor: 'white',
-                    padding: '12px',
-                    borderRadius: '6px',
-                    border: '1px solid #d1d5db',
-                    textAlign: 'center'
-                  }}>
-                    <div style={{
-                      fontSize: '12px',
-                      color: '#6b7280',
-                      marginBottom: '4px',
-                      fontWeight: '500'
-                    }}>
-                      TOTAL GASTADO
-                    </div>
-                    <div style={{
-                      fontSize: '18px',
-                      fontWeight: '700',
-                      color: '#1f2937'
-                    }}>
-                      {totalPrice.toFixed(2)} €
-                    </div>
-                  </div>
-
-                  <div style={{
-                    backgroundColor: 'white',
-                    padding: '12px',
-                    borderRadius: '6px',
-                    border: '1px solid #d1d5db',
-                    textAlign: 'center'
-                  }}>
-                    <div style={{
-                      fontSize: '12px',
-                      color: '#6b7280',
-                      marginBottom: '4px',
-                      fontWeight: '500'
-                    }}>
-                      PERSONAS
-                    </div>
-                    <div style={{
-                      fontSize: '18px',
-                      fontWeight: '700',
-                      color: '#1f2937'
-                    }}>
-                      {participants.length}
-                    </div>
-                  </div>
-
-                  <div style={{
-                    backgroundColor: '#10b981',
-                    padding: '12px',
-                    borderRadius: '6px',
-                    border: '1px solid #059669',
-                    textAlign: 'center'
-                  }}>
-                    <div style={{
-                      fontSize: '12px',
-                      color: 'white',
-                      marginBottom: '4px',
-                      fontWeight: '500',
-                      opacity: 0.9
-                    }}>
-                      POR PERSONA
-                    </div>
-                    <div style={{
-                      fontSize: '18px',
-                      fontWeight: '700',
-                      color: 'white'
-                    }}>
-                      {sharePerPerson.toFixed(2)} €
-                    </div>
-                  </div>
-                </div>
-
-                <div style={{
-                  fontSize: '14px',
-                  color: '#6b7280',
-                  textAlign: 'center'
-                }}>
-                </div>
-              </div>
-
-              {/* Información adicional */}
-              <div style={{
-                marginTop: '16px',
-                padding: '12px',
-                backgroundColor: '#f0f9ff',
-                borderRadius: '6px',
-                border: '1px solid #bae6fd'
-              }}>
-                <p style={{
-                  color: '#0369a1',
-                  margin: 0,
-                  fontSize: '13px',
-                  lineHeight: '1.4'
-                }}>
-                  💡 <strong>Consejo:</strong> Puedes copiar este resumen para compartirlo con los demás participantes.
+                  Primero establece el precio total de la compra usando 'Finalizar Compra'
                 </p>
+                <button
+                  onClick={() => {
+                    setSplitDialogOpen(false);
+                    setFinalizeDialogOpen(true);
+                  }}
+                  className="blue-button"
+                  style={{
+                    backgroundColor: '#3b82f6',
+                    color: 'white',
+                    border: 'none',
+                    padding: '8px 16px',
+                    borderRadius: '6px',
+                    cursor: 'pointer',
+                    fontWeight: '500',
+                    fontSize: '14px'
+                  }}
+                >
+                  Establecer Precio
+                </button>
               </div>
-            </>
-          )}
-        </div>
-      </div>
-    );
-  };
+            ) : (
+              <>
+                {/* Resumen de gastos */}
+                <div style={{
+                  backgroundColor: '#f8fafc',
+                  padding: '16px',
+                  borderRadius: '8px',
+                  border: '1px solid #e5e7eb',
+                  marginBottom: '20px'
+                }}>
+                  <div style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
+                    gap: '12px',
+                    marginBottom: '16px'
+                  }}>
+                    <div style={{
+                      backgroundColor: 'white',
+                      padding: '12px',
+                      borderRadius: '6px',
+                      border: '1px solid #d1d5db',
+                      textAlign: 'center'
+                    }}>
+                      <div style={{
+                        fontSize: '12px',
+                        color: '#6b7280',
+                        marginBottom: '4px',
+                        fontWeight: '500'
+                      }}>
+                        TOTAL GASTADO
+                      </div>
+                      <div style={{
+                        fontSize: '18px',
+                        fontWeight: '700',
+                        color: '#1f2937'
+                      }}>
+                        {totalPrice.toFixed(2)} €
+                      </div>
+                    </div>
 
-  // Estados de carga y error
-  if (loading) return (
-    <div className="elegant-loading" style={{
-      display: 'flex',
-      flexDirection: 'column',
-      alignItems: 'center',
-      justifyContent: 'center',
-      height: '50vh',
-      color: '#6B7280'
-    }}>
-      <div className="elegant-spinner" style={{
-        width: '40px',
-        height: '40px',
-        border: '4px solid #E5E7EB',
-        borderTop: '4px solid #3B82F6',
-        borderRadius: '50%',
-        animation: 'spin 1s linear infinite',
-        marginBottom: '16px'
-      }}></div>
-      <p style={{ fontSize: '18px', fontWeight: '500' }}>Cargando...</p>
-    </div>
-  );
+                    <div style={{
+                      backgroundColor: 'white',
+                      padding: '12px',
+                      borderRadius: '6px',
+                      border: '1px solid #d1d5db',
+                      textAlign: 'center'
+                    }}>
+                      <div style={{
+                        fontSize: '12px',
+                        color: '#6b7280',
+                        marginBottom: '4px',
+                        fontWeight: '500'
+                      }}>
+                        PERSONAS
+                      </div>
+                      <div style={{
+                        fontSize: '18px',
+                        fontWeight: '700',
+                        color: '#1f2937'
+                      }}>
+                        {participants.length}
+                      </div>
+                    </div>
 
-  if (error) return (
-    <div className="elegant-error" style={{
-      display: 'flex',
-      flexDirection: 'column',
-      alignItems: 'center',
-      justifyContent: 'center',
-      height: '50vh',
-      color: '#DC2626',
-      textAlign: 'center',
-      padding: '20px'
-    }}>
-      <svg width="48" height="48" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ marginBottom: '16px' }}>
-        <path d="M12 8V12M12 16H12.01M21 12C21 16.9706 16.9706 21 12 21C7.02944 21 3 16.9706 3 12C3 7.02944 7.02944 3 12 3C16.9706 3 21 7.02944 21 12Z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-      </svg>
-      <p style={{ fontSize: '18px', fontWeight: '500', marginBottom: '16px' }}>Error: {error}</p>
-      <button
-        onClick={() => setError(null)}
-        style={{
-          padding: '10px 20px',
-          backgroundColor: '#3B82F6',
-          color: 'white',
-          border: 'none',
-          borderRadius: '8px',
-          fontSize: '16px',
-          fontWeight: '500',
-          cursor: 'pointer'
-        }}
-      >
-        Reintentar
-      </button>
-    </div>
-  );
+                    <div style={{
+                      backgroundColor: '#10b981',
+                      padding: '12px',
+                      borderRadius: '6px',
+                      border: '1px solid #059669',
+                      textAlign: 'center'
+                    }}>
+                      <div style={{
+                        fontSize: '12px',
+                        color: 'white',
+                        marginBottom: '4px',
+                        fontWeight: '500',
+                        opacity: 0.9
+                      }}>
+                        POR PERSONA
+                      </div>
+                      <div style={{
+                        fontSize: '18px',
+                        fontWeight: '700',
+                        color: 'white'
+                      }}>
+                        {sharePerPerson.toFixed(2)} €
+                      </div>
+                    </div>
+                  </div>
 
-  // Render principal de la aplicación
-  return (
-    <div className="elegant-app-container" style={{
-      minHeight: '100vh',
-      backgroundColor: '#F3F4F6',
-      display: 'flex',
-      flexDirection: 'column'
-    }}>
+                  <div style={{
+                    fontSize: '14px',
+                    color: '#6b7280',
+                    textAlign: 'center'
+                  }}>
+                  </div>
+                </div>
 
-      <ToastContainer
-        style={{
-          position: 'fixed',
-          top: '20px',
-          left: '50%',
-          transform: 'translateX(-50%)',
-          zIndex: 2000,
-          maxWidth: '90%'
-        }}
-        closeButton={false}
-        autoClose={2000}
-        hideProgressBar={true}
-      />
-
-      {/* Barra de navegación */}
-      <nav style={{
-        backgroundColor: '#F0F9FF',
-        boxShadow: '0 2px 10px rgba(0,0,0,0.1)',
-        padding: '16px 0',
-        flexShrink: 0,
-        width: '100%',
-        position: 'relative',
-        zIndex: 100
-      }}>
-        <div className="navbar-content" style={{
-          maxWidth: '100%',
-          margin: '0 auto',
-          padding: '0 20px',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          flexWrap: 'wrap',
-          gap: '16px'
-        }}>
-          <div className="logo-container" style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '12px'
-          }}>
-            <img
-              src="/logo.png"
-              alt="BuyNote Logo"
-              width="50"
-              height="50"
-              style={{ objectFit: 'contain' }}
-            />
-            <span className="app-name" style={{
-              fontSize: '24px',
-              fontWeight: '700',
-              color: '#1F2937',
-              background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-              WebkitBackgroundClip: 'text',
-              WebkitTextFillColor: 'transparent'
-            }}>
-              BuyNote
-            </span>
-          </div>
-
-          <div className="navbar-actions">
-            <button
-              className="elegant-logout-btn"
-              onClick={() => signOut(auth)}
-              title="Cerrar sesión"
-              style={{
-                padding: '8px 16px',
-                border: '1px solid #D1D5DB',
-                borderRadius: '8px',
-                backgroundColor: 'white',
-                color: '#374151',
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '8px',
-                transition: 'all 0.2s',
-                fontSize: '14px'
-              }}
-              onMouseEnter={(e) => {
-                e.target.style.backgroundColor = '#F3F4F6';
-                e.target.style.borderColor = '#9CA3AF';
-              }}
-              onMouseLeave={(e) => {
-                e.target.style.backgroundColor = 'white';
-                e.target.style.borderColor = '#D1D5DB';
-              }}
-            >
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <path d="M9 21H5C4.46957 21 3.96086 20.7893 3.58579 20.4142C3.21071 20.0391 3 19.5304 3 19V5C3 4.46957 3.21071 3.96086 3.58579 3.58579C3.96086 3.21071 4.46957 3 5 3H9" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                <path d="M16 17L21 12L16 7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                <path d="M21 12H9" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-              Cerrar Sesión
-            </button>
+                {/* Información adicional */}
+                <div style={{
+                  marginTop: '16px',
+                  padding: '12px',
+                  backgroundColor: '#f0f9ff',
+                  borderRadius: '6px',
+                  border: '1px solid #bae6fd'
+                }}>
+                  <p style={{
+                    color: '#0369a1',
+                    margin: 0,
+                    fontSize: '13px',
+                    lineHeight: '1.4'
+                  }}>
+                    💡 <strong>Consejo:</strong> Puedes copiar este resumen para compartirlo con los demás participantes.
+                  </p>
+                </div>
+              </>
+            )}
           </div>
         </div>
-      </nav>
+      );
+    };
 
-      {/* Contenido principal */}
-      <main className="elegant-main-content" style={{
-        flex: 1,
+    // Estados de carga y error
+    if (loading) return (
+      <div className="elegant-loading" style={{
         display: 'flex',
         flexDirection: 'column',
-        width: '100%',
-        maxWidth: '100%',
-        margin: '0',
-        padding: '0'
+        alignItems: 'center',
+        justifyContent: 'center',
+        height: '50vh',
+        color: '#6B7280'
       }}>
-        <div className="elegant-content-card" style={{
+        <div className="elegant-spinner" style={{
+          width: '40px',
+          height: '40px',
+          border: '4px solid #E5E7EB',
+          borderTop: '4px solid #3B82F6',
+          borderRadius: '50%',
+          animation: 'spin 1s linear infinite',
+          marginBottom: '16px'
+        }}></div>
+        <p style={{ fontSize: '18px', fontWeight: '500' }}>Cargando...</p>
+      </div>
+    );
+
+    if (error) return (
+      <div className="elegant-error" style={{
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        height: '50vh',
+        color: '#DC2626',
+        textAlign: 'center',
+        padding: '20px'
+      }}>
+        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ marginBottom: '16px' }}>
+          <path d="M12 8V12M12 16H12.01M21 12C21 16.9706 16.9706 21 12 21C7.02944 21 3 16.9706 3 12C3 7.02944 7.02944 3 12 3C16.9706 3 21 7.02944 21 12Z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+        <p style={{ fontSize: '18px', fontWeight: '500', marginBottom: '16px' }}>Error: {error}</p>
+        <button
+          onClick={() => setError(null)}
+          style={{
+            padding: '10px 20px',
+            backgroundColor: '#3B82F6',
+            color: 'white',
+            border: 'none',
+            borderRadius: '8px',
+            fontSize: '16px',
+            fontWeight: '500',
+            cursor: 'pointer'
+          }}
+        >
+          Reintentar
+        </button>
+      </div>
+    );
+
+    // Render principal de la aplicación
+    return (
+      <div className="elegant-app-container" style={{
+        minHeight: '100vh',
+        backgroundColor: '#F3F4F6',
+        display: 'flex',
+        flexDirection: 'column'
+      }}>
+
+        <ToastContainer
+          style={{
+            position: 'fixed',
+            top: '20px',
+            left: '50%',
+            transform: 'translateX(-50%)',
+            zIndex: 2000,
+            maxWidth: '90%'
+          }}
+          closeButton={false}
+          autoClose={2000}
+          hideProgressBar={true}
+        />
+
+        {/* Barra de navegación */}
+        <nav style={{
           backgroundColor: '#F0F9FF',
-          borderRadius: '0',
-          boxShadow: 'none',
-          padding: '24px',
-          margin: '0',
+          boxShadow: '0 2px 10px rgba(0,0,0,0.1)',
+          padding: '16px 0',
+          flexShrink: 0,
+          width: '100%',
+          position: 'relative',
+          zIndex: 100
+        }}>
+          <div className="navbar-content" style={{
+            maxWidth: '100%',
+            margin: '0 auto',
+            padding: '0 20px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            flexWrap: 'wrap',
+            gap: '16px'
+          }}>
+            <div className="logo-container" style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '12px'
+            }}>
+              <img
+                src="/logo.png"
+                alt="BuyNote Logo"
+                width="50"
+                height="50"
+                style={{ objectFit: 'contain' }}
+              />
+              <span className="app-name" style={{
+                fontSize: '24px',
+                fontWeight: '700',
+                color: '#1F2937',
+                background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                WebkitBackgroundClip: 'text',
+                WebkitTextFillColor: 'transparent'
+              }}>
+                BuyNote
+              </span>
+            </div>
+
+            <div className="navbar-actions">
+              <button
+                className="elegant-logout-btn"
+                onClick={() => signOut(auth)}
+                title="Cerrar sesión"
+                style={{
+                  padding: '8px 16px',
+                  border: '1px solid #D1D5DB',
+                  borderRadius: '8px',
+                  backgroundColor: 'white',
+                  color: '#374151',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  transition: 'all 0.2s',
+                  fontSize: '14px'
+                }}
+                onMouseEnter={(e) => {
+                  e.target.style.backgroundColor = '#F3F4F6';
+                  e.target.style.borderColor = '#9CA3AF';
+                }}
+                onMouseLeave={(e) => {
+                  e.target.style.backgroundColor = 'white';
+                  e.target.style.borderColor = '#D1D5DB';
+                }}
+              >
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M9 21H5C4.46957 21 3.96086 20.7893 3.58579 20.4142C3.21071 20.0391 3 19.5304 3 19V5C3 4.46957 3.21071 3.96086 3.58579 3.58579C3.96086 3.21071 4.46957 3 5 3H9" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                  <path d="M16 17L21 12L16 7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                  <path d="M21 12H9" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+                Cerrar Sesión
+              </button>
+            </div>
+          </div>
+        </nav>
+
+        {/* Contenido principal */}
+        <main className="elegant-main-content" style={{
           flex: 1,
           display: 'flex',
           flexDirection: 'column',
-          minHeight: 'calc(100vh - 80px)',
           width: '100%',
           maxWidth: '100%',
-          boxSizing: 'border-box'
+          margin: '0',
+          padding: '0'
         }}>
-          {/* Creador elegante de listas */}
-          <ElegantListCreator />
+          <div className="elegant-content-card" style={{
+            backgroundColor: '#F0F9FF',
+            borderRadius: '0',
+            boxShadow: 'none',
+            padding: '24px',
+            margin: '0',
+            flex: 1,
+            display: 'flex',
+            flexDirection: 'column',
+            minHeight: 'calc(100vh - 80px)',
+            width: '100%',
+            maxWidth: '100%',
+            boxSizing: 'border-box'
+          }}>
+            {/* Creador elegante de listas */}
+            <ElegantListCreator />
 
-          {/* Selector de lista elegante */}
-          {allLists.length > 0 && (
-            <div className="elegant-list-selector" style={{
-              marginBottom: '24px',
-              width: '100%'
-            }}>
-              <div className="selector-header" style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                marginBottom: '16px',
-                flexWrap: 'wrap',
-                gap: '12px',
+            {/* Selector de lista elegante */}
+            {allLists.length > 0 && (
+              <div className="elegant-list-selector" style={{
+                marginBottom: '24px',
                 width: '100%'
               }}>
-                <h3 style={{
-                  fontSize: '20px',
-                  fontWeight: '600',
-                  color: '#1F2937',
-                  margin: 0
-                }}>
-                  Seleccionar Lista
-                </h3>
-
-                <div className="list-actions" style={{
+                <div className="selector-header" style={{
                   display: 'flex',
-                  gap: '8px',
-                  flexWrap: 'wrap'
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  marginBottom: '16px',
+                  flexWrap: 'wrap',
+                  gap: '12px',
+                  width: '100%'
                 }}>
-                  <button
-                    onClick={openShareDialog}
-                    disabled={!currentList || loading || isCurrentListShared()}
-                    className="elegant-action-btn"
-                    title={isCurrentListShared() ? "No puedes compartir una lista compartida" : "Compartir lista"}
-                    style={{
-                      padding: '8px 12px',
-                      border: '1px solid #E5E7EB',
-                      borderRadius: '8px',
-                      backgroundColor: 'white',
-                      cursor: isCurrentListShared() ? 'not-allowed' : 'pointer',
-                      opacity: isCurrentListShared() ? 0.5 : 1,
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '6px',
-                      fontSize: '14px',
-                      fontWeight: '500',
-                      transition: 'all 0.2s',
-                      minWidth: 'fit-content',
-                      color: "black",
-                      borderColor: ""
-                    }}
-                    onMouseEnter={(e) => {
-                      if (!isCurrentListShared()) {
-                        e.target.style.backgroundColor = '#F3F4F6';
-                      }
-                    }}
-                    onMouseLeave={(e) => {
-                      if (!isCurrentListShared()) {
-                        e.target.style.backgroundColor = 'white';
-                      }
-                    }}
-                  >
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                      <path
-                        d="M18 8C19.6569 8 21 6.65685 21 5C21 3.34315 19.6569 2 18 2C16.3431 2 15 3.34315 15 5C15 5.12548 15.0077 5.24919 15.0227 5.37061L8.0826 9.84066C7.54305 9.32015 6.80879 9 6 9C4.34315 9 3 10.3431 3 12C3 13.6569 4.34315 15 6 15C6.80879 15 7.54305 14.6798 8.0826 14.1593L15.0227 18.6294C15.0077 18.7508 15 18.8745 15 19C15 20.6569 16.3431 22 18 22C19.6569 22 21 20.6569 21 19C21 17.3431 19.6569 16 18 16C17.1912 16 16.4569 16.3202 15.9174 16.8407L8.97727 12.3706C8.99229 12.2492 9 12.1255 9 12C9 11.8745 8.99229 11.7508 8.97727 11.6294L15.9174 7.15934C16.4569 7.67985 17.1912 8 18 8Z"
-                        fill={isCurrentListShared() ? "#9CA3AF" : "#3B82F6"}
-                      />
-                    </svg>
-                    Compartir
-                  </button>
+                  <h3 style={{
+                    fontSize: '20px',
+                    fontWeight: '600',
+                    color: '#1F2937',
+                    margin: 0
+                  }}>
+                    Seleccionar Lista
+                  </h3>
 
-                  <button
-                    onClick={() => {
-                      const currentListData = allLists.find(list => list.id === currentList);
-                      if (currentListData && isCurrentListOwned()) {
-                        setConfirmListDelete(currentListData);
-                      }
-                    }}
-                    disabled={!currentList || loading || !isCurrentListOwned()}
-                    className="elegant-action-btn"
-                    title={!isCurrentListOwned() ? "Solo el propietario puede eliminar la lista" : "Eliminar lista"}
-                    style={{
-                      padding: '8px 12px',
-                      border: '1px solid #E5E7EB',
-                      borderRadius: '8px',
-                      backgroundColor: 'white',
-                      cursor: !isCurrentListOwned() ? 'not-allowed' : 'pointer',
-                      opacity: !isCurrentListOwned() ? 0.5 : 1,
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '6px',
-                      fontSize: '14px',
-                      fontWeight: '500',
-                      transition: 'all 0.2s',
-                      color: !isCurrentListOwned() ? '#9CA3AF' : '#EF4444',
-                      borderColor: !isCurrentListOwned() ? '#E5E7EB' : '#FECACA',
-                      minWidth: 'fit-content'
-                    }}
-                    onMouseEnter={(e) => {
-                      if (isCurrentListOwned()) {
-                        e.target.style.backgroundColor = '#FEF2F2';
-                        e.target.style.borderColor = '#FECACA';
-                      }
-                    }}
-                    onMouseLeave={(e) => {
-                      if (isCurrentListOwned()) {
-                        e.target.style.backgroundColor = 'white';
-                        e.target.style.borderColor = '#E5E7EB';
-                      }
-                    }}
-                  >
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                      <path
-                        d="M19 7L18.1327 19.1425C18.0579 20.1891 17.187 21 16.1378 21H7.86224C6.81296 21 5.94208 20.1891 5.86732 19.1425L5 7M10 11V17M14 11V17M15 7V4C15 3.44772 14.5523 3 14 3H10C9.44772 3 9 3.44772 9 4V7M4 7H20"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      />
-                    </svg>
-                    Eliminar
-                  </button>
+                  <div className="list-actions" style={{
+                    display: 'flex',
+                    gap: '8px',
+                    flexWrap: 'wrap'
+                  }}>
+                    <button
+                      onClick={openShareDialog}
+                      disabled={!currentList || loading || isCurrentListShared()}
+                      className="elegant-action-btn"
+                      title={isCurrentListShared() ? "No puedes compartir una lista compartida" : "Compartir lista"}
+                      style={{
+                        padding: '8px 12px',
+                        border: '1px solid #E5E7EB',
+                        borderRadius: '8px',
+                        backgroundColor: 'white',
+                        cursor: isCurrentListShared() ? 'not-allowed' : 'pointer',
+                        opacity: isCurrentListShared() ? 0.5 : 1,
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                        fontSize: '14px',
+                        fontWeight: '500',
+                        transition: 'all 0.2s',
+                        minWidth: 'fit-content',
+                        color: "black",
+                        borderColor: ""
+                      }}
+                      onMouseEnter={(e) => {
+                        if (!isCurrentListShared()) {
+                          e.target.style.backgroundColor = '#F3F4F6';
+                        }
+                      }}
+                      onMouseLeave={(e) => {
+                        if (!isCurrentListShared()) {
+                          e.target.style.backgroundColor = 'white';
+                        }
+                      }}
+                    >
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path
+                          d="M18 8C19.6569 8 21 6.65685 21 5C21 3.34315 19.6569 2 18 2C16.3431 2 15 3.34315 15 5C15 5.12548 15.0077 5.24919 15.0227 5.37061L8.0826 9.84066C7.54305 9.32015 6.80879 9 6 9C4.34315 9 3 10.3431 3 12C3 13.6569 4.34315 15 6 15C6.80879 15 7.54305 14.6798 8.0826 14.1593L15.0227 18.6294C15.0077 18.7508 15 18.8745 15 19C15 20.6569 16.3431 22 18 22C19.6569 22 21 20.6569 21 19C21 17.3431 19.6569 16 18 16C17.1912 16 16.4569 16.3202 15.9174 16.8407L8.97727 12.3706C8.99229 12.2492 9 12.1255 9 12C9 11.8745 8.99229 11.7508 8.97727 11.6294L15.9174 7.15934C16.4569 7.67985 17.1912 8 18 8Z"
+                          fill={isCurrentListShared() ? "#9CA3AF" : "#3B82F6"}
+                        />
+                      </svg>
+                      Compartir
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        const currentListData = allLists.find(list => list.id === currentList);
+                        if (currentListData && isCurrentListOwned()) {
+                          setConfirmListDelete(currentListData);
+                        }
+                      }}
+                      disabled={!currentList || loading || !isCurrentListOwned()}
+                      className="elegant-action-btn"
+                      title={!isCurrentListOwned() ? "Solo el propietario puede eliminar la lista" : "Eliminar lista"}
+                      style={{
+                        padding: '8px 12px',
+                        border: '1px solid #E5E7EB',
+                        borderRadius: '8px',
+                        backgroundColor: 'white',
+                        cursor: !isCurrentListOwned() ? 'not-allowed' : 'pointer',
+                        opacity: !isCurrentListOwned() ? 0.5 : 1,
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                        fontSize: '14px',
+                        fontWeight: '500',
+                        transition: 'all 0.2s',
+                        color: !isCurrentListOwned() ? '#9CA3AF' : '#EF4444',
+                        borderColor: !isCurrentListOwned() ? '#E5E7EB' : '#FECACA',
+                        minWidth: 'fit-content'
+                      }}
+                      onMouseEnter={(e) => {
+                        if (isCurrentListOwned()) {
+                          e.target.style.backgroundColor = '#FEF2F2';
+                          e.target.style.borderColor = '#FECACA';
+                        }
+                      }}
+                      onMouseLeave={(e) => {
+                        if (isCurrentListOwned()) {
+                          e.target.style.backgroundColor = 'white';
+                          e.target.style.borderColor = '#E5E7EB';
+                        }
+                      }}
+                    >
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path
+                          d="M19 7L18.1327 19.1425C18.0579 20.1891 17.187 21 16.1378 21H7.86224C6.81296 21 5.94208 20.1891 5.86732 19.1425L5 7M10 11V17M14 11V17M15 7V4C15 3.44772 14.5523 3 14 3H10C9.44772 3 9 3.44772 9 4V7M4 7H20"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                      </svg>
+                      Eliminar
+                    </button>
+                  </div>
                 </div>
-              </div>
 
-              <select
-                value={currentList}
-                onChange={(e) => setCurrentList(e.target.value)}
-                disabled={loading}
-                className="elegant-select"
-                style={{
-                  width: '100%',
-                  padding: '12px 16px',
-                  border: '1px solid #D1D5DB',
-                  borderRadius: '8px',
-                  fontSize: '16px',
-                  color: '#1F2937',
-                  backgroundColor: 'white',
-                  outline: 'none',
-                  cursor: 'pointer',
-                  boxSizing: 'border-box'
-                }}
-              >
-                <option value="" disabled hidden>
-                  Selecciona una lista...
-                </option>
+                <select
+                  value={currentList}
+                  onChange={(e) => setCurrentList(e.target.value)}
+                  disabled={loading}
+                  className="elegant-select"
+                  style={{
+                    width: '100%',
+                    padding: '12px 16px',
+                    border: '1px solid #D1D5DB',
+                    borderRadius: '8px',
+                    fontSize: '16px',
+                    color: '#1F2937',
+                    backgroundColor: 'white',
+                    outline: 'none',
+                    cursor: 'pointer',
+                    boxSizing: 'border-box'
+                  }}
+                >
+                  <option value="" disabled hidden>
+                    Selecciona una lista...
+                  </option>
 
-                <optgroup label="Mis listas">
-                  {lists
-                    .filter(list => !list.sharedWith || list.sharedWith.length === 0)
-                    .map((list, index) => (
-                      <option key={`my-${list.id || index}`} value={list.id}>
-                        {list.name}
-                        {list.isOptimistic && " (guardando...)"}
-                      </option>
-                    ))}
-                </optgroup>
-
-                {lists.filter(list => list.sharedWith && list.sharedWith.length > 0).length > 0 && (
-                  <optgroup label="Listas que he compartido">
+                  <optgroup label="Mis listas">
                     {lists
-                      .filter(list => list.sharedWith && list.sharedWith.length > 0)
+                      .filter(list => !list.sharedWith || list.sharedWith.length === 0)
                       .map((list, index) => (
-                        <option key={`shared-by-me-${list.id || index}`} value={list.id}>
-                          {list.name} ✓
+                        <option key={`my-${list.id || index}`} value={list.id}>
+                          {list.name}
+                          {list.isOptimistic && " (guardando...)"}
                         </option>
                       ))}
                   </optgroup>
-                )}
 
-                {sharedLists.length > 0 && (
-                  <optgroup label="Listas compartidas conmigo">
-                    {sharedLists.map((list, index) => (
-                      <option key={`shared-with-me-${list.id || index}`} value={list.id}>
-                        {list.name} ({list.ownerEmail?.split('@')[0] || 'Usuario'})
-                      </option>
-                    ))}
-                  </optgroup>
-                )}
-              </select>
+                  {lists.filter(list => list.sharedWith && list.sharedWith.length > 0).length > 0 && (
+                    <optgroup label="Listas que he compartido">
+                      {lists
+                        .filter(list => list.sharedWith && list.sharedWith.length > 0)
+                        .map((list, index) => (
+                          <option key={`shared-by-me-${list.id || index}`} value={list.id}>
+                            {list.name} ✓
+                          </option>
+                        ))}
+                    </optgroup>
+                  )}
 
-              {/* Información de la lista actual */}
-              {currentList && (
-                <div className="current-list-info" style={{
-                  marginTop: '16px',
-                  padding: '16px',
-                  backgroundColor: '#F8FAFC',
-                  borderRadius: '8px',
-                  border: '1px solid #E2E8F0',
-                  width: '100%',
-                  boxSizing: 'border-box'
-                }}>
-                  <h4 style={{
-                    fontSize: '18px',
-                    fontWeight: '600',
-                    color: isCurrentListShared() ? '#3B82F6' :
-                      isCurrentListSharedByMe() ? '#10B981' : '#1F2937',
-                    margin: '0 0 8px 0'
+                  {sharedLists.length > 0 && (
+                    <optgroup label="Listas compartidas conmigo">
+                      {sharedLists.map((list, index) => (
+                        <option key={`shared-with-me-${list.id || index}`} value={list.id}>
+                          {list.name} ({list.ownerEmail?.split('@')[0] || 'Usuario'})
+                        </option>
+                      ))}
+                    </optgroup>
+                  )}
+                </select>
+
+                {/* Información de la lista actual */}
+                {currentList && (
+                  <div className="current-list-info" style={{
+                    marginTop: '16px',
+                    padding: '16px',
+                    backgroundColor: '#F8FAFC',
+                    borderRadius: '8px',
+                    border: '1px solid #E2E8F0',
+                    width: '100%',
+                    boxSizing: 'border-box'
                   }}>
-                    {getCurrentListName()}
-                    {isCurrentListShared() && (
-                      <span style={{
-                        fontSize: '14px',
-                        fontWeight: '400',
-                        color: '#6B7280',
-                        marginLeft: '8px'
-                      }}>
-                        (Compartida conmigo)
-                      </span>
-                    )}
-                    {isCurrentListSharedByMe() && (
-                      <span style={{
-                        fontSize: '14px',
-                        fontWeight: '400',
-                        color: '#10B981',
-                        marginLeft: '8px'
-                      }}>
-                        (Compartida por mí)
-                      </span>
-                    )}
-                  </h4>
+                    <h4 style={{
+                      fontSize: '18px',
+                      fontWeight: '600',
+                      color: isCurrentListShared() ? '#3B82F6' :
+                        isCurrentListSharedByMe() ? '#10B981' : '#1F2937',
+                      margin: '0 0 8px 0'
+                    }}>
+                      {getCurrentListName()}
+                      {isCurrentListShared() && (
+                        <span style={{
+                          fontSize: '14px',
+                          fontWeight: '400',
+                          color: '#6B7280',
+                          marginLeft: '8px'
+                        }}>
+                          (Compartida conmigo)
+                        </span>
+                      )}
+                      {isCurrentListSharedByMe() && (
+                        <span style={{
+                          fontSize: '14px',
+                          fontWeight: '400',
+                          color: '#10B981',
+                          marginLeft: '8px'
+                        }}>
+                          (Compartida por mí)
+                        </span>
+                      )}
+                    </h4>
 
-                  {/* Sección de Información de la Lista */}
-                  <ListInfoSection />
-                </div>
-              )}
-            </div>
-          )}
-
-          {!allLists.length && (
-            <div className="elegant-empty-state" style={{
-              textAlign: 'center',
-              padding: '40px 20px',
-              color: '#6B7280',
-              flex: 1,
-              display: 'flex',
-              flexDirection: 'column',
-              justifyContent: 'center',
-              alignItems: 'center',
-              width: '100%'
-            }}>
-              <svg width="64" height="64" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ marginBottom: '16px', opacity: 0.5 }}>
-                <path d="M9 5H7C5.89543 5 5 5.89543 5 7V19C5 20.1046 5.89543 21 7 21H17C18.1046 21 19 20.1046 19 19V7C19 5.89543 18.1046 5 17 5H15M9 5C9 6.10457 9.89543 7 11 7H13C14.1046 7 15 6.10457 15 5M9 5C9 3.89543 9.89543 3 11 3H13C14.1046 3 15 3.89543 15 5M12 12H15M12 16H15M9 12H9.01M9 16H9.01" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-              <h3 style={{ fontSize: '20px', fontWeight: '600', marginBottom: '8px' }}>No tienes listas creadas</h3>
-              <p style={{ fontSize: '16px' }}>Crea tu primera lista para empezar a organizar tus compras</p>
-            </div>
-          )}
-
-          {/* Sección de items - SOLO se muestra si hay una lista seleccionada */}
-          {currentList && (
-            <div className="elegant-items-section" style={{
-              flex: 1,
-              display: 'flex',
-              flexDirection: 'column',
-              width: '100%'
-            }}>
-              <div className="section-header" style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                marginBottom: '20px',
-                flexWrap: 'wrap',
-                gap: '12px',
-                width: '100%',
-                padding: '0 8px' // Espacio lateral en el header
-              }}>
-                <h3 style={{
-                  fontSize: '20px',
-                  fontWeight: '600',
-                  color: '#1F2937',
-                  margin: 0
-                }}>
-                  Productos {isCurrentListShared() && "(Lista compartida)"}
-                </h3>
-
-                {items.length > 0 && (
-                  <div className="items-stats" style={{
-                    fontSize: '14px',
-                    color: '#6B7280',
-                    backgroundColor: '#F3F4F6',
-                    padding: '4px 12px',
-                    borderRadius: '20px',
-                    flexShrink: 0
-                  }}>
-                    {pendingItems.length} pendientes • {completedItems.length} comprados
+                    {/* Sección de Información de la Lista */}
+                    <ListInfoSection />
                   </div>
                 )}
               </div>
+            )}
 
-              {/* Añadir items elegante */}
-              <div style={{ padding: '0 8px' }}> {/* Espacio lateral para el adder */}
-                <ElegantItemAdder />
+            {!allLists.length && (
+              <div className="elegant-empty-state" style={{
+                textAlign: 'center',
+                padding: '40px 20px',
+                color: '#6B7280',
+                flex: 1,
+                display: 'flex',
+                flexDirection: 'column',
+                justifyContent: 'center',
+                alignItems: 'center',
+                width: '100%'
+              }}>
+                <svg width="64" height="64" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ marginBottom: '16px', opacity: 0.5 }}>
+                  <path d="M9 5H7C5.89543 5 5 5.89543 5 7V19C5 20.1046 5.89543 21 7 21H17C18.1046 21 19 20.1046 19 19V7C19 5.89543 18.1046 5 17 5H15M9 5C9 6.10457 9.89543 7 11 7H13C14.1046 7 15 6.10457 15 5M9 5C9 3.89543 9.89543 3 11 3H13C14.1046 3 15 3.89543 15 5M12 12H15M12 16H15M9 12H9.01M9 16H9.01" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+                <h3 style={{ fontSize: '20px', fontWeight: '600', marginBottom: '8px' }}>No tienes listas creadas</h3>
+                <p style={{ fontSize: '16px' }}>Crea tu primera lista para empezar a organizar tus compras</p>
               </div>
+            )}
 
-              {/* Lista de items */}
-              {items.length > 0 ? (
-                <div className="elegant-items-container" style={{
-                  flex: 1,
-                  overflow: 'auto',
+            {/* Sección de items - SOLO se muestra si hay una lista seleccionada */}
+            {currentList && (
+              <div className="elegant-items-section" style={{
+                flex: 1,
+                display: 'flex',
+                flexDirection: 'column',
+                width: '100%'
+              }}>
+                <div className="section-header" style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  marginBottom: '20px',
+                  flexWrap: 'wrap',
+                  gap: '12px',
                   width: '100%',
-                  padding: '0 8px', // Espacio lateral en el contenedor
-                  boxSizing: 'border-box'
+                  padding: '0 8px' // Espacio lateral en el header
                 }}>
-                  {/* Items pendientes agrupados por categoría */}
-                  {Object.keys(groupedPendingItems).map(category => {
-                    const categoryInfo = getCategoryInfo(category);
-                    return (
-                      <div key={`category-${category}`} className="category-section" style={{ width: '100%' }}>
+                  <h3 style={{
+                    fontSize: '20px',
+                    fontWeight: '600',
+                    color: '#1F2937',
+                    margin: 0
+                  }}>
+                    Productos {isCurrentListShared() && "(Lista compartida)"}
+                  </h3>
+
+                  {items.length > 0 && (
+                    <div className="items-stats" style={{
+                      fontSize: '14px',
+                      color: '#6B7280',
+                      backgroundColor: '#F3F4F6',
+                      padding: '4px 12px',
+                      borderRadius: '20px',
+                      flexShrink: 0
+                    }}>
+                      {pendingItems.length} pendientes • {completedItems.length} comprados
+                    </div>
+                  )}
+                </div>
+
+                {/* Añadir items elegante */}
+                <div style={{ padding: '0 8px' }}> {/* Espacio lateral para el adder */}
+                  <ElegantItemAdder />
+                </div>
+
+                {/* Lista de items */}
+                {items.length > 0 ? (
+                  <div className="elegant-items-container" style={{
+                    flex: 1,
+                    overflow: 'auto',
+                    width: '100%',
+                    padding: '0 8px', // Espacio lateral en el contenedor
+                    boxSizing: 'border-box'
+                  }}>
+                    {/* Items pendientes agrupados por categoría */}
+                    {Object.keys(groupedPendingItems).map(category => {
+                      const categoryInfo = getCategoryInfo(category);
+                      return (
+                        <div key={`category-${category}`} className="category-section" style={{ width: '100%' }}>
+                          <div className="category-header" style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '8px',
+                            padding: '12px 16px',
+                            backgroundColor: `${categoryInfo.color}99`,
+                            borderLeft: `4px solid ${categoryInfo.color}`,
+                            borderRadius: '8px',
+                            margin: '16px 0 8px 0',
+                            flexWrap: 'wrap',
+                            width: '100%',
+                            boxSizing: 'border-box'
+                          }}>
+                            <span style={{
+                              fontSize: '18px',
+                              flexShrink: 0
+                            }}>
+                              {categoryInfo.icon}
+                            </span>
+                            <h4 style={{
+                              fontSize: '16px',
+                              fontWeight: '700',
+                              color: 'white',
+                              margin: 0,
+                              flex: '1 1 auto',
+                              minWidth: '120px'
+                            }}>
+                              {categoryInfo.name}
+                            </h4>
+                            {/* CONTADOR ELIMINADO - Solo queda el nombre de la categoría */}
+                          </div>
+                          <ul className="elegant-items-list" style={{
+                            listStyle: 'none',
+                            padding: 0,
+                            margin: 0,
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: '12px',
+                            width: '100%'
+                          }}>
+                            {groupedPendingItems[category].map(item => (
+                              <ElegantItem key={item.id} item={item} />
+                            ))}
+                          </ul>
+                        </div>
+                      );
+                    })}
+
+                    {/* Sección de COMPRADO */}
+                    {completedItems.length > 0 && (
+                      <div className="completed-section" style={{ width: '100%' }}>
                         <div className="category-header" style={{
                           display: 'flex',
                           alignItems: 'center',
                           gap: '8px',
                           padding: '12px 16px',
-                          backgroundColor: `${categoryInfo.color}99`,
-                          borderLeft: `4px solid ${categoryInfo.color}`,
+                          backgroundColor: '#10B98199',
+                          borderLeft: '4px solid #10B981',
                           borderRadius: '8px',
-                          margin: '16px 0 8px 0',
+                          margin: '24px 0 8px 0',
                           flexWrap: 'wrap',
                           width: '100%',
                           boxSizing: 'border-box'
@@ -2206,7 +2514,7 @@ export function ShoppingList() {
                             fontSize: '18px',
                             flexShrink: 0
                           }}>
-                            {categoryInfo.icon}
+                            ✅
                           </span>
                           <h4 style={{
                             fontSize: '16px',
@@ -2216,9 +2524,8 @@ export function ShoppingList() {
                             flex: '1 1 auto',
                             minWidth: '120px'
                           }}>
-                            {categoryInfo.name}
+                            Comprado
                           </h4>
-                          {/* CONTADOR ELIMINADO - Solo queda el nombre de la categoría */}
                         </div>
                         <ul className="elegant-items-list" style={{
                           listStyle: 'none',
@@ -2229,1219 +2536,1256 @@ export function ShoppingList() {
                           gap: '12px',
                           width: '100%'
                         }}>
-                          {groupedPendingItems[category].map(item => (
+                          {completedItems.map(item => (
                             <ElegantItem key={item.id} item={item} />
                           ))}
                         </ul>
                       </div>
-                    );
-                  })}
-
-                  {/* Sección de COMPRADO */}
-                  {completedItems.length > 0 && (
-                    <div className="completed-section" style={{ width: '100%' }}>
-                      <div className="category-header" style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '8px',
-                        padding: '12px 16px',
-                        backgroundColor: '#10B98199',
-                        borderLeft: '4px solid #10B981',
-                        borderRadius: '8px',
-                        margin: '24px 0 8px 0',
-                        flexWrap: 'wrap',
-                        width: '100%',
-                        boxSizing: 'border-box'
-                      }}>
-                        <span style={{
-                          fontSize: '18px',
-                          flexShrink: 0
-                        }}>
-                          ✅
-                        </span>
-                        <h4 style={{
-                          fontSize: '16px',
-                          fontWeight: '700',
-                          color: 'white',
-                          margin: 0,
-                          flex: '1 1 auto',
-                          minWidth: '120px'
-                        }}>
-                          Comprado
-                        </h4>
-                      </div>
-                      <ul className="elegant-items-list" style={{
-                        listStyle: 'none',
-                        padding: 0,
-                        margin: 0,
-                        display: 'flex',
-                        flexDirection: 'column',
-                        gap: '12px',
-                        width: '100%'
-                      }}>
-                        {completedItems.map(item => (
-                          <ElegantItem key={item.id} item={item} />
-                        ))}
-                      </ul>
-                    </div>
-                  )}
-                </div>
-              ) : (
-                <div className="elegant-empty-items" style={{
-                  textAlign: 'center',
-                  padding: '40px 20px',
-                  color: '#6B7280',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  minHeight: '200px',
-                  flex: 1,
-                  width: '100%',
-                  padding: '0 8px', // Espacio lateral también en estado vacío
-                  boxSizing: 'border-box'
-                }}>
-                  <svg
-                    width="64"
-                    height="64"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    xmlns="http://www.w3.org/2000/svg"
-                    style={{
-                      marginBottom: '16px',
-                      opacity: 0.5
-                    }}
-                  >
-                    <path
-                      d="M3 10H21M7 3V5M17 3V5M6.2 21H17.8C18.9201 21 19.4802 21 19.908 20.782C20.2843 20.5903 20.5903 20.2843 20.782 19.908C21 19.4802 21 18.9201 21 17.8V8.2C21 7.07989 21 6.51984 20.782 6.09202C20.5903 5.71569 20.2843 5.40973 19.908 5.21799C19.4802 5 18.9201 5 17.8 5H6.2C5.0799 5 4.51984 5 4.09202 5.21799C3.71569 5.40973 3.40973 5.71569 3.21799 6.09202C3 6.51984 3 7.07989 3 8.2V17.8C3 18.9201 3 19.4802 3.21799 19.908C3.40973 20.2843 3.71569 20.5903 4.09202 20.782C4.51984 21 5.07989 21 6.2 21Z"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    />
-                  </svg>
-                  <h3 style={{
-                    fontSize: '18px',
-                    fontWeight: '600',
-                    marginBottom: '8px',
-                    color: '#374151'
-                  }}>
-                    No hay productos en esta lista
-                  </h3>
-                  <p style={{
-                    fontSize: '14px',
+                    )}
+                  </div>
+                ) : (
+                  <div className="elegant-empty-items" style={{
+                    textAlign: 'center',
+                    padding: '40px 20px',
                     color: '#6B7280',
-                    maxWidth: '300px',
-                    lineHeight: '1.5'
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    minHeight: '200px',
+                    flex: 1,
+                    width: '100%',
+                    padding: '0 8px', // Espacio lateral también en estado vacío
+                    boxSizing: 'border-box'
                   }}>
-                    Añade algunos productos usando el formulario de arriba
-                  </p>
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-      </main>
+                    <svg
+                      width="64"
+                      height="64"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      xmlns="http://www.w3.org/2000/svg"
+                      style={{
+                        marginBottom: '16px',
+                        opacity: 0.5
+                      }}
+                    >
+                      <path
+                        d="M3 10H21M7 3V5M17 3V5M6.2 21H17.8C18.9201 21 19.4802 21 19.908 20.782C20.2843 20.5903 20.5903 20.2843 20.782 19.908C21 19.4802 21 18.9201 21 17.8V8.2C21 7.07989 21 6.51984 20.782 6.09202C20.5903 5.71569 20.2843 5.40973 19.908 5.21799C19.4802 5 18.9201 5 17.8 5H6.2C5.0799 5 4.51984 5 4.09202 5.21799C3.71569 5.40973 3.40973 5.71569 3.21799 6.09202C3 6.51984 3 7.07989 3 8.2V17.8C3 18.9201 3 19.4802 3.21799 19.908C3.40973 20.2843 3.71569 20.5903 4.09202 20.782C4.51984 21 5.07989 21 6.2 21Z"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    </svg>
+                    <h3 style={{
+                      fontSize: '18px',
+                      fontWeight: '600',
+                      marginBottom: '8px',
+                      color: '#374151'
+                    }}>
+                      No hay productos en esta lista
+                    </h3>
+                    <p style={{
+                      fontSize: '14px',
+                      color: '#6B7280',
+                      maxWidth: '300px',
+                      lineHeight: '1.5'
+                    }}>
+                      Añade algunos productos usando el formulario de arriba
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </main>
 
-      {/* Modal de Compartir */}
-      {shareDialogOpen && (
-        <div className="modal-overlay" style={{
-          position: 'fixed',
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          backgroundColor: 'rgba(0, 0, 0, 0.6)',
-          display: 'flex',
-          justifyContent: 'center',
-          alignItems: 'center',
-          zIndex: 9999
-        }}>
-          <div className="dialog-modal" style={{
-            backgroundColor: 'white',
-            borderRadius: '12px',
-            boxShadow: '0 10px 30px rgba(0, 0, 0, 0.3)',
-            width: '90%',
-            maxWidth: '500px',
-            maxHeight: '90vh',
+        {/* Modal de Compartir */}
+        {shareDialogOpen && (
+          <div className="modal-overlay" style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.6)',
             display: 'flex',
-            flexDirection: 'column',
-            overflow: 'hidden'
+            justifyContent: 'center',
+            alignItems: 'center',
+            zIndex: 9999
           }}>
-            <div className="dialog-header" style={{
+            <div className="dialog-modal" style={{
+              backgroundColor: 'white',
+              borderRadius: '12px',
+              boxShadow: '0 10px 30px rgba(0, 0, 0, 0.3)',
+              width: '90%',
+              maxWidth: '500px',
+              maxHeight: '90vh',
               display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              padding: '20px 24px 0',
-              borderBottom: '1px solid #e5e7eb',
-              marginBottom: 0,
-              background: 'white'
+              flexDirection: 'column',
+              overflow: 'hidden'
             }}>
-              <h3 style={{
-                margin: 0,
-                fontSize: '1.25rem',
-                fontWeight: '600',
-                color: '#1f2937'
+              <div className="dialog-header" style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                padding: '20px 24px 0',
+                borderBottom: '1px solid #e5e7eb',
+                marginBottom: 0,
+                background: 'white'
               }}>
-                Compartir Lista
-              </h3>
-              <button
-                onClick={() => {
-                  setShareDialogOpen(false);
-                  setEmailValidation({ valid: true, message: "" });
-                  setEmailToShare("");
-                }}
-                className="close-btn"
-                style={{
-                  background: 'none',
-                  border: 'none',
-                  fontSize: '1.5rem',
-                  cursor: 'pointer',
-                  color: '#6b7280',
-                  padding: '4px',
-                  borderRadius: '4px',
-                  transition: 'all 0.2s',
-                  lineHeight: 1,
-                  width: '32px',
-                  height: '32px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center'
-                }}
-                onMouseEnter={(e) => {
-                  e.target.style.backgroundColor = '#f3f4f6';
-                  e.target.style.color = '#374151';
-                }}
-                onMouseLeave={(e) => {
-                  e.target.style.backgroundColor = 'transparent';
-                  e.target.style.color = '#6b7280';
-                }}
-              >
-                ×
-              </button>
-            </div>
-
-            <div className="dialog-content" style={{
-              padding: '24px',
-              flex: 1,
-              overflowY: 'auto',
-              background: 'white'
-            }}>
-              {/* Mensaje de validación */}
-              {emailValidation.message && (
-                <div
-                  className={`validation-message ${emailValidation.valid ? 'success' : 'error'}`}
+                <h3 style={{
+                  margin: 0,
+                  fontSize: '1.25rem',
+                  fontWeight: '600',
+                  color: '#1f2937'
+                }}>
+                  Compartir Lista
+                </h3>
+                <button
+                  onClick={() => {
+                    setShareDialogOpen(false);
+                    setEmailValidation({ valid: true, message: "" });
+                    setEmailToShare("");
+                  }}
+                  className="close-btn"
                   style={{
-                    padding: "12px",
-                    borderRadius: "8px",
-                    marginBottom: "16px",
-                    backgroundColor: emailValidation.valid ? "#f0f9ff" : "#fef2f2",
-                    color: emailValidation.valid ? "#0369a1" : "#dc2626",
-                    border: `1px solid ${emailValidation.valid ? "#bae6fd" : "#fecaca"}`,
-                    fontSize: "14px"
+                    background: 'none',
+                    border: 'none',
+                    fontSize: '1.5rem',
+                    cursor: 'pointer',
+                    color: '#6b7280',
+                    padding: '4px',
+                    borderRadius: '4px',
+                    transition: 'all 0.2s',
+                    lineHeight: 1,
+                    width: '32px',
+                    height: '32px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.target.style.backgroundColor = '#f3f4f6';
+                    e.target.style.color = '#374151';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.target.style.backgroundColor = 'transparent';
+                    e.target.style.color = '#6b7280';
                   }}
                 >
-                  {emailValidation.message}
-                </div>
-              )}
+                  ×
+                </button>
+              </div>
 
-              <div className="share-input" style={{ display: 'flex', gap: '12px', marginBottom: '20px' }}>
-                <input
-                  type="email"
-                  value={emailToShare}
-                  onChange={(e) => {
-                    setEmailToShare(e.target.value);
-                    if (!emailValidation.valid) {
-                      setEmailValidation({ valid: true, message: "" });
-                    }
-                  }}
-                  placeholder="Introduce el email del usuario"
-                  className="elegant-input"
-                  style={{
-                    flex: 1,
-                    padding: '12px',
-                    border: `1px solid ${emailValidation.valid ? '#d1d5db' : '#dc2626'}`,
-                    borderRadius: '8px',
-                    fontSize: '16px',
-                    color: '#1f2937',
-                    outline: 'none'
-                  }}
-                  disabled={loading}
-                />
+              <div className="dialog-content" style={{
+                padding: '24px',
+                flex: 1,
+                overflowY: 'auto',
+                background: 'white'
+              }}>
+                {/* Mensaje de validación */}
+                {emailValidation.message && (
+                  <div
+                    className={`validation-message ${emailValidation.valid ? 'success' : 'error'}`}
+                    style={{
+                      padding: "12px",
+                      borderRadius: "8px",
+                      marginBottom: "16px",
+                      backgroundColor: emailValidation.valid ? "#f0f9ff" : "#fef2f2",
+                      color: emailValidation.valid ? "#0369a1" : "#dc2626",
+                      border: `1px solid ${emailValidation.valid ? "#bae6fd" : "#fecaca"}`,
+                      fontSize: "14px"
+                    }}
+                  >
+                    {emailValidation.message}
+                  </div>
+                )}
+
+                <div className="share-input" style={{ display: 'flex', gap: '12px', marginBottom: '20px' }}>
+                  <input
+                    type="email"
+                    value={emailToShare}
+                    onChange={(e) => {
+                      setEmailToShare(e.target.value);
+                      if (!emailValidation.valid) {
+                        setEmailValidation({ valid: true, message: "" });
+                      }
+                    }}
+                    placeholder="Introduce el email del usuario"
+                    className="elegant-input"
+                    style={{
+                      flex: 1,
+                      padding: '12px',
+                      border: `1px solid ${emailValidation.valid ? '#d1d5db' : '#dc2626'}`,
+                      borderRadius: '8px',
+                      fontSize: '16px',
+                      color: '#1f2937',
+                      outline: 'none'
+                    }}
+                    disabled={loading}
+                  />
+                  <button
+                    onClick={shareList}
+                    disabled={loading || !emailToShare.trim()}
+                    className="blue-button"
+                    style={{
+                      backgroundColor: loading || !emailToShare.trim() ? '#9ca3af' : '#3b82f6',
+                      color: 'white',
+                      border: 'none',
+                      padding: '12px 20px',
+                      borderRadius: '8px',
+                      cursor: loading || !emailToShare.trim() ? 'not-allowed' : 'pointer',
+                      fontWeight: '500',
+                      transition: 'all 0.2s',
+                      minWidth: '100px'
+                    }}
+                    onMouseEnter={(e) => {
+                      if (!loading && emailToShare.trim()) {
+                        e.target.style.backgroundColor = '#2563eb';
+                      }
+                    }}
+                    onMouseLeave={(e) => {
+                      if (!loading && emailToShare.trim()) {
+                        e.target.style.backgroundColor = '#3b82f6';
+                      }
+                    }}
+                  >
+                    {loading ? "Compartiendo..." : "Compartir"}
+                  </button>
+                </div>
+
+                {/* Información adicional */}
+                <div className="share-info" style={{
+                  marginTop: "20px",
+                  fontSize: "0.9rem",
+                  color: "#6b7280",
+                  backgroundColor: '#f8fafc',
+                  padding: '16px',
+                  borderRadius: '8px',
+                  border: '1px solid #e5e7eb'
+                }}>
+                  <p style={{ margin: '0 0 8px 0' }}>• El usuario recibirá acceso a esta lista</p>
+                  <p style={{ margin: '0 0 8px 0' }}>• Podrá añadir, marcar y eliminar productos</p>
+                  <p style={{ margin: '0' }}>• Solo el propietario puede eliminar la lista</p>
+                </div>
+
+                {sharedUsers.length > 0 && (
+                  <div className="shared-users" style={{ marginTop: '20px' }}>
+                    <h4 style={{
+                      color: "#1f2937",
+                      marginBottom: '12px',
+                      fontSize: '1rem',
+                      fontWeight: '600'
+                    }}>
+                      Compartido con:
+                    </h4>
+                    <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
+                      {sharedUsers.map((email, index) => (
+                        <li key={`shared-${email || index}`} style={{
+                          color: "#1f2937",
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          padding: '8px 0',
+                          borderBottom: '1px solid #f3f4f6'
+                        }}>
+                          <span>{email}</span>
+                          <button
+                            onClick={() => {
+                              setUserToUnshare(email);
+                              setUnshareDialogOpen(true);
+                              setShareDialogOpen(false);
+                            }}
+                            className="unshare-btn"
+                            disabled={loading}
+                            style={{
+                              backgroundColor: '#ef4444',
+                              color: 'white',
+                              border: 'none',
+                              padding: '6px 12px',
+                              borderRadius: '6px',
+                              cursor: 'pointer',
+                              fontSize: '12px',
+                              fontWeight: '500'
+                            }}
+                          >
+                            Eliminar
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
+
+              <div className="dialog-buttons" style={{
+                display: 'flex',
+                gap: '12px',
+                justifyContent: 'flex-end',
+                padding: '0 24px 24px',
+                flexWrap: 'wrap',
+                background: 'white'
+              }}>
                 <button
-                  onClick={shareList}
-                  disabled={loading || !emailToShare.trim()}
-                  className="blue-button"
+                  onClick={() => {
+                    setShareDialogOpen(false);
+                    setEmailValidation({ valid: true, message: "" });
+                    setEmailToShare("");
+                  }}
+                  className="cancel-btn"
                   style={{
-                    backgroundColor: loading || !emailToShare.trim() ? '#9ca3af' : '#3b82f6',
+                    backgroundColor: '#f3f4f6',
+                    color: '#374151',
+                    border: '1px solid #d1d5db',
+                    padding: '10px 20px',
+                    borderRadius: '8px',
+                    cursor: 'pointer',
+                    fontWeight: '500',
+                    transition: 'all 0.2s',
+                    minWidth: '80px'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.target.style.backgroundColor = '#e5e7eb';
+                    e.target.style.borderColor = '#9ca3af';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.target.style.backgroundColor = '#f3f4f6';
+                    e.target.style.borderColor = '#d1d5db';
+                  }}
+                >
+                  Cerrar
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Modal de Dejar de Compartir */}
+        {unshareDialogOpen && (
+          <div className="modal-overlay" style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.6)',
+            display: 'flex',
+            justifyContent: 'center',
+            alignItems: 'center',
+            zIndex: 9999
+          }}>
+            <div className="dialog-modal" style={{
+              backgroundColor: 'white',
+              borderRadius: '12px',
+              boxShadow: '0 10px 30px rgba(0, 0, 0, 0.3)',
+              width: '90%',
+              maxWidth: '400px',
+              maxHeight: '90vh',
+              display: 'flex',
+              flexDirection: 'column',
+              overflow: 'hidden'
+            }}>
+              <div className="dialog-header" style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                padding: '20px 24px 0',
+                borderBottom: '1px solid #e5e7eb',
+                marginBottom: 0,
+                background: 'white'
+              }}>
+                <h3 style={{
+                  margin: 0,
+                  fontSize: '1.25rem',
+                  fontWeight: '600',
+                  color: '#1f2937'
+                }}>
+                  Dejar de compartir
+                </h3>
+                <button
+                  onClick={() => {
+                    setUnshareDialogOpen(false);
+                    setShareDialogOpen(true);
+                  }}
+                  className="close-btn"
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    fontSize: '1.5rem',
+                    cursor: 'pointer',
+                    color: '#6b7280',
+                    padding: '4px',
+                    borderRadius: '4px',
+                    transition: 'all 0.2s',
+                    lineHeight: 1,
+                    width: '32px',
+                    height: '32px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.target.style.backgroundColor = '#f3f4f6';
+                    e.target.style.color = '#374151';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.target.style.backgroundColor = 'transparent';
+                    e.target.style.color = '#6b7280';
+                  }}
+                >
+                  ×
+                </button>
+              </div>
+
+              <div className="dialog-content" style={{
+                padding: '24px',
+                flex: 1,
+                overflowY: 'auto',
+                background: 'white'
+              }}>
+                <p style={{
+                  color: "#1f2937",
+                  margin: 0,
+                  fontSize: '16px',
+                  lineHeight: '1.5'
+                }}>
+                  ¿Dejar de compartir la lista con <strong>{userToUnshare}</strong>?
+                </p>
+              </div>
+
+              <div className="dialog-buttons" style={{
+                display: 'flex',
+                gap: '12px',
+                justifyContent: 'flex-end',
+                padding: '0 24px 24px',
+                flexWrap: 'wrap',
+                background: 'white'
+              }}>
+                <button
+                  onClick={() => {
+                    setUnshareDialogOpen(false);
+                    setShareDialogOpen(true);
+                  }}
+                  className="cancel-btn"
+                  style={{
+                    backgroundColor: '#f3f4f6',
+                    color: '#374151',
+                    border: '1px solid #d1d5db',
+                    padding: '10px 20px',
+                    borderRadius: '8px',
+                    cursor: 'pointer',
+                    fontWeight: '500',
+                    transition: 'all 0.2s',
+                    minWidth: '80px'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.target.style.backgroundColor = '#e5e7eb';
+                    e.target.style.borderColor = '#9ca3af';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.target.style.backgroundColor = '#f3f4f6';
+                    e.target.style.borderColor = '#d1d5db';
+                  }}
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={unshareList}
+                  disabled={loading}
+                  className="confirm-delete-btn"
+                  style={{
+                    backgroundColor: '#ef4444',
                     color: 'white',
                     border: 'none',
-                    padding: '12px 20px',
+                    padding: '10px 20px',
                     borderRadius: '8px',
-                    cursor: loading || !emailToShare.trim() ? 'not-allowed' : 'pointer',
+                    cursor: 'pointer',
                     fontWeight: '500',
                     transition: 'all 0.2s',
                     minWidth: '100px'
                   }}
                   onMouseEnter={(e) => {
-                    if (!loading && emailToShare.trim()) {
-                      e.target.style.backgroundColor = '#2563eb';
+                    if (!loading) {
+                      e.target.style.backgroundColor = '#dc2626';
                     }
                   }}
                   onMouseLeave={(e) => {
-                    if (!loading && emailToShare.trim()) {
-                      e.target.style.backgroundColor = '#3b82f6';
+                    if (!loading) {
+                      e.target.style.backgroundColor = '#ef4444';
                     }
                   }}
                 >
-                  {loading ? "Compartiendo..." : "Compartir"}
+                  Confirmar
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Modal de Confirmación de Eliminación de Item */}
+        {confirmDelete && (
+          <div className="modal-overlay" style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.6)',
+            display: 'flex',
+            justifyContent: 'center',
+            alignItems: 'center',
+            zIndex: 9999
+          }}>
+            <div className="dialog-modal" style={{
+              backgroundColor: 'white',
+              borderRadius: '12px',
+              boxShadow: '0 10px 30px rgba(0, 0, 0, 0.3)',
+              width: '90%',
+              maxWidth: '400px',
+              maxHeight: '90vh',
+              display: 'flex',
+              flexDirection: 'column',
+              overflow: 'hidden'
+            }}>
+              <div className="dialog-header" style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                padding: '20px 24px 0',
+                borderBottom: '1px solid #e5e7eb',
+                marginBottom: 0,
+                background: 'white'
+              }}>
+                <h3 style={{
+                  margin: 0,
+                  fontSize: '1.25rem',
+                  fontWeight: '600',
+                  color: '#1f2937'
+                }}>
+                  Confirmar eliminación
+                </h3>
+                <button
+                  onClick={() => setConfirmDelete(null)}
+                  className="close-btn"
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    fontSize: '1.5rem',
+                    cursor: 'pointer',
+                    color: '#6b7280',
+                    padding: '4px',
+                    borderRadius: '4px',
+                    transition: 'all 0.2s',
+                    lineHeight: 1,
+                    width: '32px',
+                    height: '32px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.target.style.backgroundColor = '#f3f4f6';
+                    e.target.style.color = '#374151';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.target.style.backgroundColor = 'transparent';
+                    e.target.style.color = '#6b7280';
+                  }}
+                >
+                  ×
                 </button>
               </div>
 
-              {/* Información adicional */}
-              <div className="share-info" style={{
-                marginTop: "20px",
-                fontSize: "0.9rem",
-                color: "#6b7280",
-                backgroundColor: '#f8fafc',
-                padding: '16px',
-                borderRadius: '8px',
-                border: '1px solid #e5e7eb'
+              <div className="dialog-content" style={{
+                padding: '24px',
+                flex: 1,
+                overflowY: 'auto',
+                background: 'white'
               }}>
-                <p style={{ margin: '0 0 8px 0' }}>• El usuario recibirá acceso a esta lista</p>
-                <p style={{ margin: '0 0 8px 0' }}>• Podrá añadir, marcar y eliminar productos</p>
-                <p style={{ margin: '0' }}>• Solo el propietario puede eliminar la lista</p>
+                <p style={{
+                  color: "#1f2937",
+                  margin: 0,
+                  fontSize: '16px',
+                  lineHeight: '1.5'
+                }}>
+                  ¿Eliminar "<strong>{confirmDelete.text}</strong>"?
+                </p>
               </div>
 
-              {sharedUsers.length > 0 && (
-                <div className="shared-users" style={{ marginTop: '20px' }}>
-                  <h4 style={{
-                    color: "#1f2937",
-                    marginBottom: '12px',
-                    fontSize: '1rem',
-                    fontWeight: '600'
-                  }}>
-                    Compartido con:
-                  </h4>
-                  <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
-                    {sharedUsers.map((email, index) => (
-                      <li key={`shared-${email || index}`} style={{
-                        color: "#1f2937",
-                        display: 'flex',
-                        justifyContent: 'space-between',
-                        alignItems: 'center',
-                        padding: '8px 0',
-                        borderBottom: '1px solid #f3f4f6'
-                      }}>
-                        <span>{email}</span>
-                        <button
-                          onClick={() => {
-                            setUserToUnshare(email);
-                            setUnshareDialogOpen(true);
-                            setShareDialogOpen(false);
-                          }}
-                          className="unshare-btn"
-                          disabled={loading}
-                          style={{
-                            backgroundColor: '#ef4444',
-                            color: 'white',
-                            border: 'none',
-                            padding: '6px 12px',
-                            borderRadius: '6px',
-                            cursor: 'pointer',
-                            fontSize: '12px',
-                            fontWeight: '500'
-                          }}
-                        >
-                          Eliminar
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-            </div>
-
-            <div className="dialog-buttons" style={{
-              display: 'flex',
-              gap: '12px',
-              justifyContent: 'flex-end',
-              padding: '0 24px 24px',
-              flexWrap: 'wrap',
-              background: 'white'
-            }}>
-              <button
-                onClick={() => {
-                  setShareDialogOpen(false);
-                  setEmailValidation({ valid: true, message: "" });
-                  setEmailToShare("");
-                }}
-                className="cancel-btn"
-                style={{
-                  backgroundColor: '#f3f4f6',
-                  color: '#374151',
-                  border: '1px solid #d1d5db',
-                  padding: '10px 20px',
-                  borderRadius: '8px',
-                  cursor: 'pointer',
-                  fontWeight: '500',
-                  transition: 'all 0.2s',
-                  minWidth: '80px'
-                }}
-                onMouseEnter={(e) => {
-                  e.target.style.backgroundColor = '#e5e7eb';
-                  e.target.style.borderColor = '#9ca3af';
-                }}
-                onMouseLeave={(e) => {
-                  e.target.style.backgroundColor = '#f3f4f6';
-                  e.target.style.borderColor = '#d1d5db';
-                }}
-              >
-                Cerrar
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Modal de Dejar de Compartir */}
-      {unshareDialogOpen && (
-        <div className="modal-overlay" style={{
-          position: 'fixed',
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          backgroundColor: 'rgba(0, 0, 0, 0.6)',
-          display: 'flex',
-          justifyContent: 'center',
-          alignItems: 'center',
-          zIndex: 9999
-        }}>
-          <div className="dialog-modal" style={{
-            backgroundColor: 'white',
-            borderRadius: '12px',
-            boxShadow: '0 10px 30px rgba(0, 0, 0, 0.3)',
-            width: '90%',
-            maxWidth: '400px',
-            maxHeight: '90vh',
-            display: 'flex',
-            flexDirection: 'column',
-            overflow: 'hidden'
-          }}>
-            <div className="dialog-header" style={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              padding: '20px 24px 0',
-              borderBottom: '1px solid #e5e7eb',
-              marginBottom: 0,
-              background: 'white'
-            }}>
-              <h3 style={{
-                margin: 0,
-                fontSize: '1.25rem',
-                fontWeight: '600',
-                color: '#1f2937'
+              <div className="dialog-buttons" style={{
+                display: 'flex',
+                gap: '12px',
+                justifyContent: 'flex-end',
+                padding: '0 24px 24px',
+                flexWrap: 'wrap',
+                background: 'white'
               }}>
-                Dejar de compartir
-              </h3>
-              <button
-                onClick={() => {
-                  setUnshareDialogOpen(false);
-                  setShareDialogOpen(true);
-                }}
-                className="close-btn"
-                style={{
-                  background: 'none',
-                  border: 'none',
-                  fontSize: '1.5rem',
-                  cursor: 'pointer',
-                  color: '#6b7280',
-                  padding: '4px',
-                  borderRadius: '4px',
-                  transition: 'all 0.2s',
-                  lineHeight: 1,
-                  width: '32px',
-                  height: '32px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center'
-                }}
-                onMouseEnter={(e) => {
-                  e.target.style.backgroundColor = '#f3f4f6';
-                  e.target.style.color = '#374151';
-                }}
-                onMouseLeave={(e) => {
-                  e.target.style.backgroundColor = 'transparent';
-                  e.target.style.color = '#6b7280';
-                }}
-              >
-                ×
-              </button>
-            </div>
-
-            <div className="dialog-content" style={{
-              padding: '24px',
-              flex: 1,
-              overflowY: 'auto',
-              background: 'white'
-            }}>
-              <p style={{
-                color: "#1f2937",
-                margin: 0,
-                fontSize: '16px',
-                lineHeight: '1.5'
-              }}>
-                ¿Dejar de compartir la lista con <strong>{userToUnshare}</strong>?
-              </p>
-            </div>
-
-            <div className="dialog-buttons" style={{
-              display: 'flex',
-              gap: '12px',
-              justifyContent: 'flex-end',
-              padding: '0 24px 24px',
-              flexWrap: 'wrap',
-              background: 'white'
-            }}>
-              <button
-                onClick={() => {
-                  setUnshareDialogOpen(false);
-                  setShareDialogOpen(true);
-                }}
-                className="cancel-btn"
-                style={{
-                  backgroundColor: '#f3f4f6',
-                  color: '#374151',
-                  border: '1px solid #d1d5db',
-                  padding: '10px 20px',
-                  borderRadius: '8px',
-                  cursor: 'pointer',
-                  fontWeight: '500',
-                  transition: 'all 0.2s',
-                  minWidth: '80px'
-                }}
-                onMouseEnter={(e) => {
-                  e.target.style.backgroundColor = '#e5e7eb';
-                  e.target.style.borderColor = '#9ca3af';
-                }}
-                onMouseLeave={(e) => {
-                  e.target.style.backgroundColor = '#f3f4f6';
-                  e.target.style.borderColor = '#d1d5db';
-                }}
-              >
-                Cancelar
-              </button>
-              <button
-                onClick={unshareList}
-                disabled={loading}
-                className="confirm-delete-btn"
-                style={{
-                  backgroundColor: '#ef4444',
-                  color: 'white',
-                  border: 'none',
-                  padding: '10px 20px',
-                  borderRadius: '8px',
-                  cursor: 'pointer',
-                  fontWeight: '500',
-                  transition: 'all 0.2s',
-                  minWidth: '100px'
-                }}
-                onMouseEnter={(e) => {
-                  if (!loading) {
+                <button
+                  onClick={() => setConfirmDelete(null)}
+                  className="cancel-btn"
+                  style={{
+                    backgroundColor: '#f3f4f6',
+                    color: '#374151',
+                    border: '1px solid #d1d5db',
+                    padding: '10px 20px',
+                    borderRadius: '8px',
+                    cursor: 'pointer',
+                    fontWeight: '500',
+                    transition: 'all 0.2s',
+                    minWidth: '80px'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.target.style.backgroundColor = '#e5e7eb';
+                    e.target.style.borderColor = '#9ca3af';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.target.style.backgroundColor = '#f3f4f6';
+                    e.target.style.borderColor = '#d1d5db';
+                  }}
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={() => deleteItem(confirmDelete.id)}
+                  className="confirm-delete-btn"
+                  style={{
+                    backgroundColor: '#ef4444',
+                    color: 'white',
+                    border: 'none',
+                    padding: '10px 20px',
+                    borderRadius: '8px',
+                    cursor: 'pointer',
+                    fontWeight: '500',
+                    transition: 'all 0.2s',
+                    minWidth: '80px'
+                  }}
+                  onMouseEnter={(e) => {
                     e.target.style.backgroundColor = '#dc2626';
-                  }
-                }}
-                onMouseLeave={(e) => {
-                  if (!loading) {
+                  }}
+                  onMouseLeave={(e) => {
                     e.target.style.backgroundColor = '#ef4444';
-                  }
-                }}
-              >
-                Confirmar
-              </button>
+                  }}
+                >
+                  Eliminar
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        )}
 
-      {/* Modal de Confirmación de Eliminación de Item */}
-      {confirmDelete && (
-        <div className="modal-overlay" style={{
-          position: 'fixed',
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          backgroundColor: 'rgba(0, 0, 0, 0.6)',
-          display: 'flex',
-          justifyContent: 'center',
-          alignItems: 'center',
-          zIndex: 9999
-        }}>
-          <div className="dialog-modal" style={{
-            backgroundColor: 'white',
-            borderRadius: '12px',
-            boxShadow: '0 10px 30px rgba(0, 0, 0, 0.3)',
-            width: '90%',
-            maxWidth: '400px',
-            maxHeight: '90vh',
+        {/* Modal de Confirmación de Eliminación de Lista */}
+        {confirmListDelete && (
+          <div className="modal-overlay" style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.6)',
             display: 'flex',
-            flexDirection: 'column',
-            overflow: 'hidden'
+            justifyContent: 'center',
+            alignItems: 'center',
+            zIndex: 9999
           }}>
-            <div className="dialog-header" style={{
+            <div className="dialog-modal" style={{
+              backgroundColor: 'white',
+              borderRadius: '12px',
+              boxShadow: '0 10px 30px rgba(0, 0, 0, 0.3)',
+              width: '90%',
+              maxWidth: '450px',
+              maxHeight: '90vh',
               display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              padding: '20px 24px 0',
-              borderBottom: '1px solid #e5e7eb',
-              marginBottom: 0,
-              background: 'white'
+              flexDirection: 'column',
+              overflow: 'hidden'
             }}>
-              <h3 style={{
-                margin: 0,
-                fontSize: '1.25rem',
-                fontWeight: '600',
-                color: '#1f2937'
+              <div className="dialog-header" style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                padding: '20px 24px 0',
+                borderBottom: '1px solid #e5e7eb',
+                marginBottom: 0,
+                background: 'white'
               }}>
-                Confirmar eliminación
-              </h3>
-              <button
-                onClick={() => setConfirmDelete(null)}
-                className="close-btn"
-                style={{
-                  background: 'none',
-                  border: 'none',
-                  fontSize: '1.5rem',
-                  cursor: 'pointer',
-                  color: '#6b7280',
-                  padding: '4px',
-                  borderRadius: '4px',
-                  transition: 'all 0.2s',
-                  lineHeight: 1,
-                  width: '32px',
-                  height: '32px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center'
-                }}
-                onMouseEnter={(e) => {
-                  e.target.style.backgroundColor = '#f3f4f6';
-                  e.target.style.color = '#374151';
-                }}
-                onMouseLeave={(e) => {
-                  e.target.style.backgroundColor = 'transparent';
-                  e.target.style.color = '#6b7280';
-                }}
-              >
-                ×
-              </button>
-            </div>
-
-            <div className="dialog-content" style={{
-              padding: '24px',
-              flex: 1,
-              overflowY: 'auto',
-              background: 'white'
-            }}>
-              <p style={{
-                color: "#1f2937",
-                margin: 0,
-                fontSize: '16px',
-                lineHeight: '1.5'
-              }}>
-                ¿Eliminar "<strong>{confirmDelete.text}</strong>"?
-              </p>
-            </div>
-
-            <div className="dialog-buttons" style={{
-              display: 'flex',
-              gap: '12px',
-              justifyContent: 'flex-end',
-              padding: '0 24px 24px',
-              flexWrap: 'wrap',
-              background: 'white'
-            }}>
-              <button
-                onClick={() => setConfirmDelete(null)}
-                className="cancel-btn"
-                style={{
-                  backgroundColor: '#f3f4f6',
-                  color: '#374151',
-                  border: '1px solid #d1d5db',
-                  padding: '10px 20px',
-                  borderRadius: '8px',
-                  cursor: 'pointer',
-                  fontWeight: '500',
-                  transition: 'all 0.2s',
-                  minWidth: '80px'
-                }}
-                onMouseEnter={(e) => {
-                  e.target.style.backgroundColor = '#e5e7eb';
-                  e.target.style.borderColor = '#9ca3af';
-                }}
-                onMouseLeave={(e) => {
-                  e.target.style.backgroundColor = '#f3f4f6';
-                  e.target.style.borderColor = '#d1d5db';
-                }}
-              >
-                Cancelar
-              </button>
-              <button
-                onClick={() => deleteItem(confirmDelete.id)}
-                className="confirm-delete-btn"
-                style={{
-                  backgroundColor: '#ef4444',
-                  color: 'white',
-                  border: 'none',
-                  padding: '10px 20px',
-                  borderRadius: '8px',
-                  cursor: 'pointer',
-                  fontWeight: '500',
-                  transition: 'all 0.2s',
-                  minWidth: '80px'
-                }}
-                onMouseEnter={(e) => {
-                  e.target.style.backgroundColor = '#dc2626';
-                }}
-                onMouseLeave={(e) => {
-                  e.target.style.backgroundColor = '#ef4444';
-                }}
-              >
-                Eliminar
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Modal de Confirmación de Eliminación de Lista */}
-      {confirmListDelete && (
-        <div className="modal-overlay" style={{
-          position: 'fixed',
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          backgroundColor: 'rgba(0, 0, 0, 0.6)',
-          display: 'flex',
-          justifyContent: 'center',
-          alignItems: 'center',
-          zIndex: 9999
-        }}>
-          <div className="dialog-modal" style={{
-            backgroundColor: 'white',
-            borderRadius: '12px',
-            boxShadow: '0 10px 30px rgba(0, 0, 0, 0.3)',
-            width: '90%',
-            maxWidth: '450px',
-            maxHeight: '90vh',
-            display: 'flex',
-            flexDirection: 'column',
-            overflow: 'hidden'
-          }}>
-            <div className="dialog-header" style={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              padding: '20px 24px 0',
-              borderBottom: '1px solid #e5e7eb',
-              marginBottom: 0,
-              background: 'white'
-            }}>
-              <h3 style={{
-                margin: 0,
-                fontSize: '1.25rem',
-                fontWeight: '600',
-                color: '#1f2937'
-              }}>
-                Confirmar eliminación
-              </h3>
-              <button
-                onClick={() => setConfirmListDelete(null)}
-                className="close-btn"
-                style={{
-                  background: 'none',
-                  border: 'none',
-                  fontSize: '1.5rem',
-                  cursor: 'pointer',
-                  color: '#6b7280',
-                  padding: '4px',
-                  borderRadius: '4px',
-                  transition: 'all 0.2s',
-                  lineHeight: 1,
-                  width: '32px',
-                  height: '32px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center'
-                }}
-                onMouseEnter={(e) => {
-                  e.target.style.backgroundColor = '#f3f4f6';
-                  e.target.style.color = '#374151';
-                }}
-                onMouseLeave={(e) => {
-                  e.target.style.backgroundColor = 'transparent';
-                  e.target.style.color = '#6b7280';
-                }}
-              >
-                ×
-              </button>
-            </div>
-
-            <div className="dialog-content" style={{
-              padding: '24px',
-              flex: 1,
-              overflowY: 'auto',
-              background: 'white'
-            }}>
-              <p style={{
-                color: "#1f2937",
-                margin: 0,
-                fontSize: '16px',
-                lineHeight: '1.5'
-              }}>
-                ¿Eliminar la lista "<strong>{confirmListDelete.name}</strong>" y todos sus productos?
-              </p>
-              <p style={{
-                color: "#ef4444",
-                margin: '12px 0 0 0',
-                fontSize: '14px',
-                fontWeight: '500'
-              }}>
-                Esta acción no se puede deshacer
-              </p>
-            </div>
-
-            <div className="dialog-buttons" style={{
-              display: 'flex',
-              gap: '12px',
-              justifyContent: 'flex-end',
-              padding: '0 24px 24px',
-              flexWrap: 'wrap',
-              background: 'white'
-            }}>
-              <button
-                onClick={() => setConfirmListDelete(null)}
-                className="cancel-btn"
-                style={{
-                  backgroundColor: '#f3f4f6',
-                  color: '#374151',
-                  border: '1px solid #d1d5db',
-                  padding: '10px 20px',
-                  borderRadius: '8px',
-                  cursor: 'pointer',
-                  fontWeight: '500',
-                  transition: 'all 0.2s',
-                  minWidth: '80px'
-                }}
-                onMouseEnter={(e) => {
-                  e.target.style.backgroundColor = '#e5e7eb';
-                  e.target.style.borderColor = '#9ca3af';
-                }}
-                onMouseLeave={(e) => {
-                  e.target.style.backgroundColor = '#f3f4f6';
-                  e.target.style.borderColor = '#d1d5db';
-                }}
-              >
-                Cancelar
-              </button>
-              <button
-                onClick={() => {
-                  deleteList(confirmListDelete.id);
-                }}
-                className="confirm-delete-btn"
-                style={{
-                  backgroundColor: '#ef4444',
-                  color: 'white',
-                  border: 'none',
-                  padding: '10px 20px',
-                  borderRadius: '8px',
-                  cursor: 'pointer',
-                  fontWeight: '500',
-                  transition: 'all 0.2s',
-                  minWidth: '100px'
-                }}
-                disabled={loading}
-                onMouseEnter={(e) => {
-                  if (!loading) {
-                    e.target.style.backgroundColor = '#dc2626';
-                  }
-                }}
-                onMouseLeave={(e) => {
-                  if (!loading) {
-                    e.target.style.backgroundColor = '#ef4444';
-                  }
-                }}
-              >
-                {loading ? "Eliminando..." : "Eliminar"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {finalizeDialogOpen && (
-        <div className="modal-overlay" style={{
-          position: 'fixed',
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          backgroundColor: 'rgba(0, 0, 0, 0.6)',
-          display: 'flex',
-          justifyContent: 'center',
-          alignItems: 'center',
-          zIndex: 9999
-        }}>
-          <div className="dialog-modal" style={{
-            backgroundColor: 'white',
-            borderRadius: '12px',
-            boxShadow: '0 10px 30px rgba(0, 0, 0, 0.3)',
-            width: '90%',
-            maxWidth: '500px',
-            maxHeight: '90vh',
-            display: 'flex',
-            flexDirection: 'column',
-            overflow: 'hidden'
-          }}>
-            <div className="dialog-header" style={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              padding: '20px 24px 0',
-              borderBottom: '1px solid #e5e7eb',
-              marginBottom: 0,
-              background: 'white'
-            }}>
-              <h3 style={{
-                margin: 0,
-                fontSize: '1.25rem',
-                fontWeight: '600',
-                color: '#1f2937'
-              }}>
-                Finalizar Compra
-              </h3>
-              <button
-                onClick={() => setFinalizeDialogOpen(false)}
-                className="close-btn"
-                style={{
-                  background: 'none',
-                  border: 'none',
-                  fontSize: '1.5rem',
-                  cursor: 'pointer',
-                  color: '#6b7280',
-                  padding: '4px',
-                  borderRadius: '4px',
-                  transition: 'all 0.2s',
-                  lineHeight: 1,
-                  width: '32px',
-                  height: '32px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center'
-                }}
-                onMouseEnter={(e) => {
-                  e.target.style.backgroundColor = '#f3f4f6';
-                  e.target.style.color = '#374151';
-                }}
-                onMouseLeave={(e) => {
-                  e.target.style.backgroundColor = 'transparent';
-                  e.target.style.color = '#6b7280';
-                }}
-              >
-                ×
-              </button>
-            </div>
-
-            <div className="dialog-content" style={{
-              padding: '24px',
-              flex: 1,
-              overflowY: 'auto',
-              background: 'white'
-            }}>
-              <p style={{ color: 'black', marginBottom: '16px' }}>
-                Introduce el precio total de la compra:
-              </p>
-              <input
-                type="number"
-                step="0.01"
-                min="0"
-                value={purchaseInfo[currentList]?.totalPrice?.toString() || ""}
-                onChange={(e) => {
-                  const price = e.target.value;
-                  setPurchaseInfo(prev => ({
-                    ...prev,
-                    [currentList]: price ? {
-                      ...prev[currentList],
-                      totalPrice: parseFloat(price)
-                    } : null
-                  }));
-                }}
-                placeholder="Precio total (ej: 45.50)"
-                className="elegant-input"
-                style={{
-                  color: 'black',
-                  width: '100%',
-                  padding: '12px',
-                  border: '1px solid #d1d5db',
-                  borderRadius: '8px',
-                  fontSize: '16px'
-                }}
-              />
-
-              {purchaseInfo[currentList]?.totalPrice && (
-                <div style={{
-                  marginTop: '16px',
-                  padding: '12px',
-                  backgroundColor: '#f0f9ff',
-                  borderRadius: '8px',
-                  border: '1px solid #bae6fd'
+                <h3 style={{
+                  margin: 0,
+                  fontSize: '1.25rem',
+                  fontWeight: '600',
+                  color: '#1f2937'
                 }}>
-                  <p style={{
-                    color: '#0369a1',
-                    margin: 0,
-                    fontSize: '14px'
-                  }}>
-                    💡 El precio total se mostrará en la información de la lista y podrás usarlo para dividir gastos.
-                  </p>
-                </div>
-              )}
-            </div>
+                  Confirmar eliminación
+                </h3>
+                <button
+                  onClick={() => setConfirmListDelete(null)}
+                  className="close-btn"
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    fontSize: '1.5rem',
+                    cursor: 'pointer',
+                    color: '#6b7280',
+                    padding: '4px',
+                    borderRadius: '4px',
+                    transition: 'all 0.2s',
+                    lineHeight: 1,
+                    width: '32px',
+                    height: '32px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.target.style.backgroundColor = '#f3f4f6';
+                    e.target.style.color = '#374151';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.target.style.backgroundColor = 'transparent';
+                    e.target.style.color = '#6b7280';
+                  }}
+                >
+                  ×
+                </button>
+              </div>
 
-            <div className="dialog-buttons" style={{
-              display: 'flex',
-              gap: '12px',
-              justifyContent: 'flex-end',
-              padding: '0 24px 24px',
-              flexWrap: 'wrap',
-              background: 'white'
-            }}>
-              <button
-                onClick={() => setFinalizeDialogOpen(false)}
-                className="cancel-btn"
-                style={{
-                  backgroundColor: '#f3f4f6',
-                  color: '#374151',
-                  border: '1px solid #d1d5db',
-                  padding: '10px 20px',
-                  borderRadius: '8px',
-                  cursor: 'pointer',
-                  fontWeight: '500',
-                  transition: 'all 0.2s',
-                  minWidth: '80px'
-                }}
-                onMouseEnter={(e) => {
-                  e.target.style.backgroundColor = '#e5e7eb';
-                  e.target.style.borderColor = '#9ca3af';
-                }}
-                onMouseLeave={(e) => {
-                  e.target.style.backgroundColor = '#f3f4f6';
-                  e.target.style.borderColor = '#d1d5db';
-                }}
-              >
-                Cancelar
-              </button>
-              <button
-                onClick={() => {
-                  const price = purchaseInfo[currentList]?.totalPrice;
-                  finalizePurchase(currentList, price);
-                  setFinalizeDialogOpen(false);
-                }}
-                className="blue-button"
-                style={{
-                  backgroundColor: '#3b82f6',
-                  color: 'white',
-                  border: 'none',
-                  padding: '10px 20px',
-                  borderRadius: '8px',
-                  cursor: 'pointer',
-                  fontWeight: '500',
-                  transition: 'all 0.2s',
-                  minWidth: '100px'
-                }}
-                onMouseEnter={(e) => {
-                  e.target.style.backgroundColor = '#2563eb';
-                }}
-                onMouseLeave={(e) => {
-                  e.target.style.backgroundColor = '#3b82f6';
-                }}
-              >
-                {purchaseInfo[currentList]?.totalPrice ? 'Guardar Precio' : 'Eliminar Precio'}
-              </button>
+              <div className="dialog-content" style={{
+                padding: '24px',
+                flex: 1,
+                overflowY: 'auto',
+                background: 'white'
+              }}>
+                <p style={{
+                  color: "#1f2937",
+                  margin: 0,
+                  fontSize: '16px',
+                  lineHeight: '1.5'
+                }}>
+                  ¿Eliminar la lista "<strong>{confirmListDelete.name}</strong>" y todos sus productos?
+                </p>
+                <p style={{
+                  color: "#ef4444",
+                  margin: '12px 0 0 0',
+                  fontSize: '14px',
+                  fontWeight: '500'
+                }}>
+                  Esta acción no se puede deshacer
+                </p>
+              </div>
+
+              <div className="dialog-buttons" style={{
+                display: 'flex',
+                gap: '12px',
+                justifyContent: 'flex-end',
+                padding: '0 24px 24px',
+                flexWrap: 'wrap',
+                background: 'white'
+              }}>
+                <button
+                  onClick={() => setConfirmListDelete(null)}
+                  className="cancel-btn"
+                  style={{
+                    backgroundColor: '#f3f4f6',
+                    color: '#374151',
+                    border: '1px solid #d1d5db',
+                    padding: '10px 20px',
+                    borderRadius: '8px',
+                    cursor: 'pointer',
+                    fontWeight: '500',
+                    transition: 'all 0.2s',
+                    minWidth: '80px'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.target.style.backgroundColor = '#e5e7eb';
+                    e.target.style.borderColor = '#9ca3af';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.target.style.backgroundColor = '#f3f4f6';
+                    e.target.style.borderColor = '#d1d5db';
+                  }}
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={() => {
+                    deleteList(confirmListDelete.id);
+                  }}
+                  className="confirm-delete-btn"
+                  style={{
+                    backgroundColor: '#ef4444',
+                    color: 'white',
+                    border: 'none',
+                    padding: '10px 20px',
+                    borderRadius: '8px',
+                    cursor: 'pointer',
+                    fontWeight: '500',
+                    transition: 'all 0.2s',
+                    minWidth: '100px'
+                  }}
+                  disabled={loading}
+                  onMouseEnter={(e) => {
+                    if (!loading) {
+                      e.target.style.backgroundColor = '#dc2626';
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    if (!loading) {
+                      e.target.style.backgroundColor = '#ef4444';
+                    }
+                  }}
+                >
+                  {loading ? "Eliminando..." : "Eliminar"}
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        )}
 
-      {/* Modal de Observaciones */}
-      {observationsDialogOpen && (
-        <div className="modal-overlay" style={{
-          position: 'fixed',
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          backgroundColor: 'rgba(0, 0, 0, 0.6)',
-          display: 'flex',
-          justifyContent: 'center',
-          alignItems: 'center',
-          zIndex: 9999
-        }}>
-          <div className="dialog-modal" style={{
-            backgroundColor: 'white',
-            borderRadius: '12px',
-            boxShadow: '0 10px 30px rgba(0, 0, 0, 0.3)',
-            width: '90%',
-            maxWidth: '500px',
-            maxHeight: '90vh',
+        {finalizeDialogOpen && (
+          <div className="modal-overlay" style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.6)',
             display: 'flex',
-            flexDirection: 'column',
-            overflow: 'hidden'
+            justifyContent: 'center',
+            alignItems: 'center',
+            zIndex: 9999
           }}>
-            <div className="dialog-header" style={{
+            <div className="dialog-modal" style={{
+              backgroundColor: 'white',
+              borderRadius: '12px',
+              boxShadow: '0 10px 30px rgba(0, 0, 0, 0.3)',
+              width: '90%',
+              maxWidth: '500px',
+              maxHeight: '90vh',
               display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              padding: '20px 24px 0',
-              borderBottom: '1px solid #e5e7eb',
-              marginBottom: 0,
-              background: 'white'
+              flexDirection: 'column',
+              overflow: 'hidden'
             }}>
-              <h3 style={{
-                margin: 0,
-                fontSize: '1.25rem',
-                fontWeight: '600',
-                color: '#1f2937'
+              <div className="dialog-header" style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                padding: '20px 24px 0',
+                borderBottom: '1px solid #e5e7eb',
+                marginBottom: 0,
+                background: 'white'
               }}>
-                Observaciones - {allLists.find(list => list.id === currentList)?.name || "Lista actual"}
-              </h3>
-              <button
-                onClick={() => {
-                  setObservationsDialogOpen(false);
-                  setEditingObservations(false);
-                }}
-                className="close-btn"
-                style={{
-                  background: 'none',
-                  border: 'none',
-                  fontSize: '1.5rem',
-                  cursor: 'pointer',
-                  color: '#6b7280',
-                  padding: '4px',
-                  borderRadius: '4px',
-                  transition: 'all 0.2s',
-                  lineHeight: 1,
-                  width: '32px',
-                  height: '32px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center'
-                }}
-                onMouseEnter={(e) => {
-                  e.target.style.backgroundColor = '#f3f4f6';
-                  e.target.style.color = '#374151';
-                }}
-                onMouseLeave={(e) => {
-                  e.target.style.backgroundColor = 'transparent';
-                  e.target.style.color = '#6b7280';
-                }}
-              >
-                ×
-              </button>
-            </div>
+                <h3 style={{
+                  margin: 0,
+                  fontSize: '1.25rem',
+                  fontWeight: '600',
+                  color: '#1f2937'
+                }}>
+                  Finalizar Compra
+                </h3>
+                <button
+                  onClick={() => setFinalizeDialogOpen(false)}
+                  className="close-btn"
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    fontSize: '1.5rem',
+                    cursor: 'pointer',
+                    color: '#6b7280',
+                    padding: '4px',
+                    borderRadius: '4px',
+                    transition: 'all 0.2s',
+                    lineHeight: 1,
+                    width: '32px',
+                    height: '32px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.target.style.backgroundColor = '#f3f4f6';
+                    e.target.style.color = '#374151';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.target.style.backgroundColor = 'transparent';
+                    e.target.style.color = '#6b7280';
+                  }}
+                >
+                  ×
+                </button>
+              </div>
 
-            <div className="dialog-content" style={{
-              padding: '24px',
-              flex: 1,
-              overflowY: 'auto',
-              background: 'white'
-            }}>
-              <textarea
-                value={editingObservations ? (listObservations[currentList] || "") : (listObservations[currentList] || "")}
-                onChange={(e) => !editingObservations ? null : setListObservations(prev => ({ ...prev, [currentList]: e.target.value }))}
-                placeholder="Añade observaciones sobre esta lista..."
-                rows="6"
-                disabled={!editingObservations}
-                className="elegant-textarea"
-                style={{
-                  color: 'black',
-                  width: '100%',
-                  padding: '12px',
-                  border: '1px solid #d1d5db',
-                  borderRadius: '8px',
-                  fontSize: '16px',
-                  resize: 'vertical',
-                  minHeight: '120px',
-                  backgroundColor: editingObservations ? 'white' : '#f9fafb'
-                }}
-              />
-            </div>
+              <div className="dialog-content" style={{
+                padding: '24px',
+                flex: 1,
+                overflowY: 'auto',
+                background: 'white'
+              }}>
+                <p style={{ color: 'black', marginBottom: '16px' }}>
+                  Introduce el precio total de la compra:
+                </p>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={purchaseInfo[currentList]?.totalPrice?.toString() || ""}
+                  onChange={(e) => {
+                    const price = e.target.value;
+                    setPurchaseInfo(prev => ({
+                      ...prev,
+                      [currentList]: price ? {
+                        ...prev[currentList],
+                        totalPrice: parseFloat(price)
+                      } : null
+                    }));
+                  }}
+                  placeholder="Precio total (ej: 45.50)"
+                  className="elegant-input"
+                  style={{
+                    color: 'black',
+                    width: '100%',
+                    padding: '12px',
+                    border: '1px solid #d1d5db',
+                    borderRadius: '8px',
+                    fontSize: '16px'
+                  }}
+                />
 
-            <div className="dialog-buttons" style={{
+                {purchaseInfo[currentList]?.totalPrice && (
+                  <div style={{
+                    marginTop: '16px',
+                    padding: '12px',
+                    backgroundColor: '#f0f9ff',
+                    borderRadius: '8px',
+                    border: '1px solid #bae6fd'
+                  }}>
+                    <p style={{
+                      color: '#0369a1',
+                      margin: 0,
+                      fontSize: '14px'
+                    }}>
+                      💡 El precio total se mostrará en la información de la lista y podrás usarlo para dividir gastos.
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              <div className="dialog-buttons" style={{
+                display: 'flex',
+                gap: '12px',
+                justifyContent: 'flex-end',
+                padding: '0 24px 24px',
+                flexWrap: 'wrap',
+                background: 'white'
+              }}>
+                <button
+                  onClick={() => setFinalizeDialogOpen(false)}
+                  className="cancel-btn"
+                  style={{
+                    backgroundColor: '#f3f4f6',
+                    color: '#374151',
+                    border: '1px solid #d1d5db',
+                    padding: '10px 20px',
+                    borderRadius: '8px',
+                    cursor: 'pointer',
+                    fontWeight: '500',
+                    transition: 'all 0.2s',
+                    minWidth: '80px'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.target.style.backgroundColor = '#e5e7eb';
+                    e.target.style.borderColor = '#9ca3af';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.target.style.backgroundColor = '#f3f4f6';
+                    e.target.style.borderColor = '#d1d5db';
+                  }}
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={() => {
+                    const price = purchaseInfo[currentList]?.totalPrice;
+                    finalizePurchase(currentList, price);
+                    setFinalizeDialogOpen(false);
+                  }}
+                  className="blue-button"
+                  style={{
+                    backgroundColor: '#3b82f6',
+                    color: 'white',
+                    border: 'none',
+                    padding: '10px 20px',
+                    borderRadius: '8px',
+                    cursor: 'pointer',
+                    fontWeight: '500',
+                    transition: 'all 0.2s',
+                    minWidth: '100px'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.target.style.backgroundColor = '#2563eb';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.target.style.backgroundColor = '#3b82f6';
+                  }}
+                >
+                  {purchaseInfo[currentList]?.totalPrice ? 'Guardar Precio' : 'Eliminar Precio'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Modal de Observaciones */}
+        {observationsDialogOpen && (
+          <div className="modal-overlay" style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.6)',
+            display: 'flex',
+            justifyContent: 'center',
+            alignItems: 'center',
+            zIndex: 9999
+          }}>
+            <div className="dialog-modal" style={{
+              backgroundColor: 'white',
+              borderRadius: '12px',
+              boxShadow: '0 10px 30px rgba(0, 0, 0, 0.3)',
+              width: '90%',
+              maxWidth: '500px',
+              maxHeight: '90vh',
               display: 'flex',
-              gap: '12px',
-              justifyContent: 'flex-end',
-              padding: '0 24px 24px',
-              flexWrap: 'wrap',
-              background: 'white'
+              flexDirection: 'column',
+              overflow: 'hidden'
             }}>
-              {!editingObservations ? (
-                <>
-                  <button
-                    onClick={() => setObservationsDialogOpen(false)}
-                    className="cancel-btn"
-                    style={{
-                      backgroundColor: '#f3f4f6',
-                      color: '#374151',
-                      border: '1px solid #d1d5db',
-                      padding: '10px 20px',
-                      borderRadius: '8px',
-                      cursor: 'pointer',
-                      fontWeight: '500',
-                      transition: 'all 0.2s',
-                      minWidth: '80px'
-                    }}
-                    onMouseEnter={(e) => {
-                      e.target.style.backgroundColor = '#e5e7eb';
-                      e.target.style.borderColor = '#9ca3af';
-                    }}
-                    onMouseLeave={(e) => {
-                      e.target.style.backgroundColor = '#f3f4f6';
-                      e.target.style.borderColor = '#d1d5db';
-                    }}
-                  >
-                    Cerrar
-                  </button>
-                  <button
-                    onClick={() => setEditingObservations(true)}
-                    className="blue-button"
-                    style={{
-                      backgroundColor: '#3b82f6',
-                      color: 'white',
-                      border: 'none',
-                      padding: '10px 20px',
-                      borderRadius: '8px',
-                      cursor: 'pointer',
-                      fontWeight: '500',
-                      transition: 'all 0.2s',
-                      minWidth: '80px'
-                    }}
-                    onMouseEnter={(e) => {
-                      e.target.style.backgroundColor = '#2563eb';
-                    }}
-                    onMouseLeave={(e) => {
-                      e.target.style.backgroundColor = '#3b82f6';
-                    }}
-                  >
-                    Editar
-                  </button>
-                  {listObservations[currentList] && (
+              <div className="dialog-header" style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                padding: '20px 24px 0',
+                borderBottom: '1px solid #e5e7eb',
+                marginBottom: 0,
+                background: 'white'
+              }}>
+                <h3 style={{
+                  margin: 0,
+                  fontSize: '1.25rem',
+                  fontWeight: '600',
+                  color: '#1f2937'
+                }}>
+                  Observaciones - {allLists.find(list => list.id === currentList)?.name || "Lista actual"}
+                </h3>
+                <button
+                  onClick={() => {
+                    setObservationsDialogOpen(false);
+                    setEditingObservations(false);
+                  }}
+                  className="close-btn"
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    fontSize: '1.5rem',
+                    cursor: 'pointer',
+                    color: '#6b7280',
+                    padding: '4px',
+                    borderRadius: '4px',
+                    transition: 'all 0.2s',
+                    lineHeight: 1,
+                    width: '32px',
+                    height: '32px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.target.style.backgroundColor = '#f3f4f6';
+                    e.target.style.color = '#374151';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.target.style.backgroundColor = 'transparent';
+                    e.target.style.color = '#6b7280';
+                  }}
+                >
+                  ×
+                </button>
+              </div>
+
+              <div className="dialog-content" style={{
+                padding: '24px',
+                flex: 1,
+                overflowY: 'auto',
+                background: 'white'
+              }}>
+                <textarea
+                  value={editingObservations ? (listObservations[currentList] || "") : (listObservations[currentList] || "")}
+                  onChange={(e) => !editingObservations ? null : setListObservations(prev => ({ ...prev, [currentList]: e.target.value }))}
+                  placeholder="Añade observaciones sobre esta lista..."
+                  rows="6"
+                  disabled={!editingObservations}
+                  className="elegant-textarea"
+                  style={{
+                    color: 'black',
+                    width: '100%',
+                    padding: '12px',
+                    border: '1px solid #d1d5db',
+                    borderRadius: '8px',
+                    fontSize: '16px',
+                    resize: 'vertical',
+                    minHeight: '120px',
+                    backgroundColor: editingObservations ? 'white' : '#f9fafb'
+                  }}
+                />
+              </div>
+
+              <div className="dialog-buttons" style={{
+                display: 'flex',
+                gap: '12px',
+                justifyContent: 'flex-end',
+                padding: '0 24px 24px',
+                flexWrap: 'wrap',
+                background: 'white'
+              }}>
+                {!editingObservations ? (
+                  <>
+                    <button
+                      onClick={() => setObservationsDialogOpen(false)}
+                      className="cancel-btn"
+                      style={{
+                        backgroundColor: '#f3f4f6',
+                        color: '#374151',
+                        border: '1px solid #d1d5db',
+                        padding: '10px 20px',
+                        borderRadius: '8px',
+                        cursor: 'pointer',
+                        fontWeight: '500',
+                        transition: 'all 0.2s',
+                        minWidth: '80px'
+                      }}
+                      onMouseEnter={(e) => {
+                        e.target.style.backgroundColor = '#e5e7eb';
+                        e.target.style.borderColor = '#9ca3af';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.target.style.backgroundColor = '#f3f4f6';
+                        e.target.style.borderColor = '#d1d5db';
+                      }}
+                    >
+                      Cerrar
+                    </button>
+                    <button
+                      onClick={() => setEditingObservations(true)}
+                      className="blue-button"
+                      style={{
+                        backgroundColor: '#3b82f6',
+                        color: 'white',
+                        border: 'none',
+                        padding: '10px 20px',
+                        borderRadius: '8px',
+                        cursor: 'pointer',
+                        fontWeight: '500',
+                        transition: 'all 0.2s',
+                        minWidth: '80px'
+                      }}
+                      onMouseEnter={(e) => {
+                        e.target.style.backgroundColor = '#2563eb';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.target.style.backgroundColor = '#3b82f6';
+                      }}
+                    >
+                      Editar
+                    </button>
+                    {listObservations[currentList] && (
+                      <button
+                        onClick={() => {
+                          saveListObservations(currentList, "");
+                          setEditingObservations(false);
+                        }}
+                        className="cancel-btn"
+                        style={{
+                          backgroundColor: '#f3f4f6',
+                          color: '#374151',
+                          border: '1px solid #d1d5db',
+                          padding: '10px 20px',
+                          borderRadius: '8px',
+                          cursor: 'pointer',
+                          fontWeight: '500',
+                          transition: 'all 0.2s',
+                          minWidth: '80px'
+                        }}
+                        onMouseEnter={(e) => {
+                          e.target.style.backgroundColor = '#e5e7eb';
+                          e.target.style.borderColor = '#9ca3af';
+                        }}
+                        onMouseLeave={(e) => {
+                          e.target.style.backgroundColor = '#f3f4f6';
+                          e.target.style.borderColor = '#d1d5db';
+                        }}
+                      >
+                        Limpiar
+                      </button>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <button
+                      onClick={() => {
+                        setObservationsDialogOpen(false);
+                        setEditingObservations(false);
+                      }}
+                      className="cancel-btn"
+                      style={{
+                        backgroundColor: '#f3f4f6',
+                        color: '#374151',
+                        border: '1px solid #d1d5db',
+                        padding: '10px 20px',
+                        borderRadius: '8px',
+                        cursor: 'pointer',
+                        fontWeight: '500',
+                        transition: 'all 0.2s',
+                        minWidth: '80px'
+                      }}
+                      onMouseEnter={(e) => {
+                        e.target.style.backgroundColor = '#e5e7eb';
+                        e.target.style.borderColor = '#9ca3af';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.target.style.backgroundColor = '#f3f4f6';
+                        e.target.style.borderColor = '#d1d5db';
+                      }}
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      onClick={() => {
+                        saveListObservations(currentList, listObservations[currentList] || "");
+                        setEditingObservations(false);
+                      }}
+                      className="blue-button"
+                      style={{
+                        backgroundColor: '#3b82f6',
+                        color: 'white',
+                        border: 'none',
+                        padding: '10px 20px',
+                        borderRadius: '8px',
+                        cursor: 'pointer',
+                        fontWeight: '500',
+                        transition: 'all 0.2s',
+                        minWidth: '80px'
+                      }}
+                      onMouseEnter={(e) => {
+                        e.target.style.backgroundColor = '#2563eb';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.target.style.backgroundColor = '#3b82f6';
+                      }}
+                    >
+                      Guardar
+                    </button>
                     <button
                       onClick={() => {
                         saveListObservations(currentList, "");
+                        setListObservations(prev => ({ ...prev, [currentList]: "" }));
                         setEditingObservations(false);
                       }}
                       className="cancel-btn"
@@ -3467,224 +3811,137 @@ export function ShoppingList() {
                     >
                       Limpiar
                     </button>
-                  )}
-                </>
-              ) : (
-                <>
-                  <button
-                    onClick={() => {
-                      setObservationsDialogOpen(false);
-                      setEditingObservations(false);
-                    }}
-                    className="cancel-btn"
-                    style={{
-                      backgroundColor: '#f3f4f6',
-                      color: '#374151',
-                      border: '1px solid #d1d5db',
-                      padding: '10px 20px',
-                      borderRadius: '8px',
-                      cursor: 'pointer',
-                      fontWeight: '500',
-                      transition: 'all 0.2s',
-                      minWidth: '80px'
-                    }}
-                    onMouseEnter={(e) => {
-                      e.target.style.backgroundColor = '#e5e7eb';
-                      e.target.style.borderColor = '#9ca3af';
-                    }}
-                    onMouseLeave={(e) => {
-                      e.target.style.backgroundColor = '#f3f4f6';
-                      e.target.style.borderColor = '#d1d5db';
-                    }}
-                  >
-                    Cancelar
-                  </button>
-                  <button
-                    onClick={() => {
-                      saveListObservations(currentList, listObservations[currentList] || "");
-                      setEditingObservations(false);
-                    }}
-                    className="blue-button"
-                    style={{
-                      backgroundColor: '#3b82f6',
-                      color: 'white',
-                      border: 'none',
-                      padding: '10px 20px',
-                      borderRadius: '8px',
-                      cursor: 'pointer',
-                      fontWeight: '500',
-                      transition: 'all 0.2s',
-                      minWidth: '80px'
-                    }}
-                    onMouseEnter={(e) => {
-                      e.target.style.backgroundColor = '#2563eb';
-                    }}
-                    onMouseLeave={(e) => {
-                      e.target.style.backgroundColor = '#3b82f6';
-                    }}
-                  >
-                    Guardar
-                  </button>
-                  <button
-                    onClick={() => {
-                      saveListObservations(currentList, "");
-                      setListObservations(prev => ({ ...prev, [currentList]: "" }));
-                      setEditingObservations(false);
-                    }}
-                    className="cancel-btn"
-                    style={{
-                      backgroundColor: '#f3f4f6',
-                      color: '#374151',
-                      border: '1px solid #d1d5db',
-                      padding: '10px 20px',
-                      borderRadius: '8px',
-                      cursor: 'pointer',
-                      fontWeight: '500',
-                      transition: 'all 0.2s',
-                      minWidth: '80px'
-                    }}
-                    onMouseEnter={(e) => {
-                      e.target.style.backgroundColor = '#e5e7eb';
-                      e.target.style.borderColor = '#9ca3af';
-                    }}
-                    onMouseLeave={(e) => {
-                      e.target.style.backgroundColor = '#f3f4f6';
-                      e.target.style.borderColor = '#d1d5db';
-                    }}
-                  >
-                    Limpiar
-                  </button>
-                </>
-              )}
+                  </>
+                )}
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        )}
 
-      {/* Modal de División de Gastos */}
-      {splitDialogOpen && (
-        <div className="modal-overlay" style={{
-          position: 'fixed',
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          backgroundColor: 'rgba(0, 0, 0, 0.6)',
-          display: 'flex',
-          justifyContent: 'center',
-          alignItems: 'center',
-          zIndex: 9999
-        }}>
-          <div className="dialog-modal" style={{
-            backgroundColor: 'white',
-            borderRadius: '12px',
-            boxShadow: '0 10px 30px rgba(0, 0, 0, 0.3)',
-            width: '90%',
-            maxWidth: '500px',
-            maxHeight: '90vh',
+        {/* Modal de División de Gastos */}
+        {splitDialogOpen && (
+          <div className="modal-overlay" style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.6)',
             display: 'flex',
-            flexDirection: 'column',
-            overflow: 'hidden'
+            justifyContent: 'center',
+            alignItems: 'center',
+            zIndex: 9999
           }}>
-            <div className="dialog-header" style={{
+            <div className="dialog-modal" style={{
+              backgroundColor: 'white',
+              borderRadius: '12px',
+              boxShadow: '0 10px 30px rgba(0, 0, 0, 0.3)',
+              width: '90%',
+              maxWidth: '500px',
+              maxHeight: '90vh',
               display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              padding: '20px 24px 0',
-              borderBottom: '1px solid #e5e7eb',
-              marginBottom: 0,
-              background: 'white'
+              flexDirection: 'column',
+              overflow: 'hidden'
             }}>
-              <h3 style={{
-                margin: 0,
-                fontSize: '1.25rem',
-                fontWeight: '600',
-                color: '#1f2937'
+              <div className="dialog-header" style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                padding: '20px 24px 0',
+                borderBottom: '1px solid #e5e7eb',
+                marginBottom: 0,
+                background: 'white'
               }}>
-                División de Gastos
-              </h3>
-              <button
-                onClick={() => setSplitDialogOpen(false)}
-                className="close-btn"
-                style={{
-                  background: 'none',
-                  border: 'none',
-                  fontSize: '1.5rem',
-                  cursor: 'pointer',
-                  color: '#6b7280',
-                  padding: '4px',
-                  borderRadius: '4px',
-                  transition: 'all 0.2s',
-                  lineHeight: 1,
-                  width: '32px',
-                  height: '32px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center'
-                }}
-                onMouseEnter={(e) => {
-                  e.target.style.backgroundColor = '#f3f4f6';
-                  e.target.style.color = '#374151';
-                }}
-                onMouseLeave={(e) => {
-                  e.target.style.backgroundColor = 'transparent';
-                  e.target.style.color = '#6b7280';
-                }}
-              >
-                ×
-              </button>
-            </div>
-
-            <SplitDialogContent />
-
-            <div className="dialog-buttons" style={{
-              display: 'flex',
-              gap: '12px',
-              justifyContent: 'flex-end',
-              padding: '0 24px 24px',
-              flexWrap: 'wrap',
-              background: 'white'
-            }}>
-              <button
-                onClick={() => setSplitDialogOpen(false)}
-                className="cancel-btn"
-                style={{
-                  backgroundColor: '#f3f4f6',
-                  color: '#374151',
-                  border: '1px solid #d1d5db',
-                  padding: '10px 20px',
-                  borderRadius: '8px',
-                  cursor: 'pointer',
-                  fontWeight: '500',
-                  transition: 'all 0.2s',
-                  minWidth: '80px'
-                }}
-                onMouseEnter={(e) => {
-                  e.target.style.backgroundColor = '#e5e7eb';
-                  e.target.style.borderColor = '#9ca3af';
-                }}
-                onMouseLeave={(e) => {
-                  e.target.style.backgroundColor = '#f3f4f6';
-                  e.target.style.borderColor = '#d1d5db';
-                }}
-              >
-                Cerrar
-              </button>
-
-              {/* Botón para copiar resumen - solo visible cuando hay precio */}
-              {purchaseInfo[currentList]?.totalPrice && (isCurrentListShared() || isCurrentListSharedByMe()) && (
+                <h3 style={{
+                  margin: 0,
+                  fontSize: '1.25rem',
+                  fontWeight: '600',
+                  color: '#1f2937'
+                }}>
+                  División de Gastos
+                </h3>
                 <button
-                  onClick={() => {
-                    const currentPurchaseInfo = purchaseInfo[currentList];
-                    const totalPrice = currentPurchaseInfo?.totalPrice;
-                    const currentListData = allLists.find(list => list.id === currentList);
-                    const participants = [
-                      currentListData?.ownerEmail || auth.currentUser?.email || "Tú",
-                      ...(currentListData?.sharedWith || [])
-                    ];
-                    const sharePerPerson = totalPrice ? totalPrice / participants.length : 0;
+                  onClick={() => setSplitDialogOpen(false)}
+                  className="close-btn"
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    fontSize: '1.5rem',
+                    cursor: 'pointer',
+                    color: '#6b7280',
+                    padding: '4px',
+                    borderRadius: '4px',
+                    transition: 'all 0.2s',
+                    lineHeight: 1,
+                    width: '32px',
+                    height: '32px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.target.style.backgroundColor = '#f3f4f6';
+                    e.target.style.color = '#374151';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.target.style.backgroundColor = 'transparent';
+                    e.target.style.color = '#6b7280';
+                  }}
+                >
+                  ×
+                </button>
+              </div>
 
-                    const result = `💰 RESUMEN DE GASTOS - ${currentListData?.name}
+              <SplitDialogContent />
+
+              <div className="dialog-buttons" style={{
+                display: 'flex',
+                gap: '12px',
+                justifyContent: 'flex-end',
+                padding: '0 24px 24px',
+                flexWrap: 'wrap',
+                background: 'white'
+              }}>
+                <button
+                  onClick={() => setSplitDialogOpen(false)}
+                  className="cancel-btn"
+                  style={{
+                    backgroundColor: '#f3f4f6',
+                    color: '#374151',
+                    border: '1px solid #d1d5db',
+                    padding: '10px 20px',
+                    borderRadius: '8px',
+                    cursor: 'pointer',
+                    fontWeight: '500',
+                    transition: 'all 0.2s',
+                    minWidth: '80px'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.target.style.backgroundColor = '#e5e7eb';
+                    e.target.style.borderColor = '#9ca3af';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.target.style.backgroundColor = '#f3f4f6';
+                    e.target.style.borderColor = '#d1d5db';
+                  }}
+                >
+                  Cerrar
+                </button>
+
+                {/* Botón para copiar resumen - solo visible cuando hay precio */}
+                {purchaseInfo[currentList]?.totalPrice && (isCurrentListShared() || isCurrentListSharedByMe()) && (
+                  <button
+                    onClick={() => {
+                      const currentPurchaseInfo = purchaseInfo[currentList];
+                      const totalPrice = currentPurchaseInfo?.totalPrice;
+                      const currentListData = allLists.find(list => list.id === currentList);
+                      const participants = [
+                        currentListData?.ownerEmail || auth.currentUser?.email || "Tú",
+                        ...(currentListData?.sharedWith || [])
+                      ];
+                      const sharePerPerson = totalPrice ? totalPrice / participants.length : 0;
+
+                      const result = `💰 RESUMEN DE GASTOS - ${currentListData?.name}
 
 💶 Total gastado: ${totalPrice.toFixed(2)} €
 👥 Número de personas: ${participants.length}
@@ -3695,43 +3952,43 @@ ${participants.map((p, i) => `${i + 1}. ${p === auth.currentUser?.email ? 'Tú' 
 
 ¡Gracias por participar! 🛒`;
 
-                    navigator.clipboard.writeText(result);
-                    showToast("Resumen copiado al portapapeles", 'success');
-                  }}
-                  className="blue-button"
-                  style={{
-                    backgroundColor: '#10b981',
-                    color: 'white',
-                    border: 'none',
-                    padding: '10px 20px',
-                    borderRadius: '8px',
-                    cursor: 'pointer',
-                    fontWeight: '500',
-                    transition: 'all 0.2s',
-                    minWidth: '100px',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '6px'
-                  }}
-                  onMouseEnter={(e) => {
-                    e.target.style.backgroundColor = '#059669';
-                  }}
-                  onMouseLeave={(e) => {
-                    e.target.style.backgroundColor = '#10b981';
-                  }}
-                >
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                    <path d="M8 16H6C4.89543 16 4 15.1046 4 14V6C4 4.89543 4.89543 4 6 4H14C15.1046 4 16 4.89543 16 6V8M10 20H18C19.1046 20 20 19.1046 20 18V10C20 8.89543 19.1046 8 18 8H10C8.89543 8 8 8.89543 8 10V18C8 19.1046 8.89543 20 10 20Z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                  </svg>
-                  Copiar
-                </button>
-              )}
+                      navigator.clipboard.writeText(result);
+                      showToast("Resumen copiado al portapapeles", 'success');
+                    }}
+                    className="blue-button"
+                    style={{
+                      backgroundColor: '#10b981',
+                      color: 'white',
+                      border: 'none',
+                      padding: '10px 20px',
+                      borderRadius: '8px',
+                      cursor: 'pointer',
+                      fontWeight: '500',
+                      transition: 'all 0.2s',
+                      minWidth: '100px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '6px'
+                    }}
+                    onMouseEnter={(e) => {
+                      e.target.style.backgroundColor = '#059669';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.target.style.backgroundColor = '#10b981';
+                    }}
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                      <path d="M8 16H6C4.89543 16 4 15.1046 4 14V6C4 4.89543 4.89543 4 6 4H14C15.1046 4 16 4.89543 16 6V8M10 20H18C19.1046 20 20 19.1046 20 18V10C20 8.89543 19.1046 8 18 8H10C8.89543 8 8 8.89543 8 10V18C8 19.1046 8.89543 20 10 20Z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                    Copiar
+                  </button>
+                )}
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        )}
 
-      <style jsx>{`
+        <style jsx>{`
         :root {
           --primary-blue: #1e88e5;
           --dark-blue: #0d47a1;
@@ -4303,6 +4560,7 @@ ${participants.map((p, i) => `${i + 1}. ${p === auth.currentUser?.email ? 'Tú' 
           }
         }
       `}</style>
-    </div>
-  );
+      </div>
+    );
+  }
 }
