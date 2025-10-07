@@ -36,6 +36,7 @@ export function ShoppingList() {
   const [finalizeDialogOpen, setFinalizeDialogOpen] = useState(false); // Diálogo finalizar compra
   const [splitDialogOpen, setSplitDialogOpen] = useState(false); // Diálogo dividir gastos
   const [editingObservations, setEditingObservations] = useState(false); // Modo edición observaciones
+  const initialLoad = useRef(true);
 
   // Referencias para cache
   const itemsCache = useRef({});
@@ -212,6 +213,70 @@ export function ShoppingList() {
     setShareDialogOpen(true);
   };
 
+  useEffect(() => {
+    // Este efecto asegura que currentList no se cambie accidentalmente
+    // durante operaciones que no deberían afectarla
+    console.log("Lista actual:", currentList);
+  }, [currentList]);
+
+  // También puedes agregar una verificación en el efecto de carga de items
+  useEffect(() => {
+    if (!currentList) {
+      setItems([]);
+      return;
+    }
+
+    console.log("Cargando items para lista:", currentList);
+
+    const q = query(
+      collection(db, "items"),
+      where("listId", "==", currentList)
+    );
+
+    const unsubscribe = onSnapshot(q,
+      (snapshot) => {
+        // Verificar que todavía estamos en la misma lista
+        if (!currentList) return;
+
+        const updatedItems = snapshot.docs.map(doc => {
+          const data = doc.data();
+
+          // Asegurar que todos los campos necesarios existen
+          const categoryInfo = getCategoryInfo(data.category || "OTHER");
+
+          return {
+            id: doc.id,
+            text: data.text || "",
+            listId: data.listId || currentList,
+            userId: data.userId || "",
+            addedBy: data.addedBy || "",
+            completed: data.completed || false,
+            purchasedBy: data.purchasedBy || "",
+            purchasedAt: data.purchasedAt || null,
+            category: data.category || "OTHER",
+            createdAt: data.createdAt || new Date(),
+            categoryColor: categoryInfo.color,
+            categoryIcon: categoryInfo.icon,
+            isOptimistic: false
+          };
+        });
+
+        // Combinar con items optimistas
+        const optimisticItems = items.filter(item =>
+          item.isOptimistic && item.listId === currentList
+        );
+        const combinedItems = [...optimisticItems, ...updatedItems];
+        setItems(combinedItems);
+      },
+      (error) => {
+        setError(`Error al cargar productos: ${error.message}`);
+        showToast(`Error al cargar productos: ${error.message}`, 'error');
+      }
+    );
+
+    return unsubscribe;
+  }, [currentList]);
+
   // Crear una nueva lista de compras
   const createElegantList = async (listName) => {
     if (!auth.currentUser?.uid || !listName.trim()) {
@@ -232,7 +297,7 @@ export function ShoppingList() {
 
       // Actualización optimista para respuesta inmediata
       setLists(prev => [...prev, tempList]);
-      setCurrentList(tempId);
+      setCurrentList(tempId); // Esta línea está bien - es una nueva lista
 
       // Persistencia en Firebase
       const docRef = await addDoc(collection(db, "lists"), {
@@ -252,7 +317,7 @@ export function ShoppingList() {
         )
       );
 
-      setCurrentList(docRef.id);
+      setCurrentList(docRef.id); // Mantener en la nueva lista creada
       showToast(`Lista "${listName}" creada exitosamente`, 'success');
       return docRef.id;
 
@@ -260,9 +325,6 @@ export function ShoppingList() {
       console.error("Error creando lista:", err);
       // Revertir actualización optimista en caso de error
       setLists(prev => prev.filter(list => list.id !== tempId));
-      if (currentList === tempId) {
-        setCurrentList(lists[0]?.id || "");
-      }
       throw err;
     }
   };
@@ -521,8 +583,15 @@ export function ShoppingList() {
 
       setConfirmListDelete(null);
 
+      // SOLO cambiar currentList si se está eliminando la lista actual
       if (currentList === listId) {
-        setCurrentList("");
+        // Buscar otra lista disponible
+        const remainingLists = [...lists, ...sharedLists].filter(list => list.id !== listId);
+        if (remainingLists.length > 0) {
+          setCurrentList(remainingLists[0].id);
+        } else {
+          setCurrentList("");
+        }
       }
 
       // Mostrar mensaje de éxito
@@ -531,11 +600,6 @@ export function ShoppingList() {
     } catch (err) {
       setError(`Error al eliminar: ${err.message}`);
       showToast(`Error al eliminar: ${err.message}`, 'error');
-
-      // Revertir cambios locales en caso de error
-      if (currentList === listId) {
-        setCurrentList(listId);
-      }
     }
   };
 
@@ -629,6 +693,8 @@ export function ShoppingList() {
       });
 
       const batch = writeBatch(db);
+
+      // Eliminar items del usuario
       const itemsQuery = query(
         collection(db, "items"),
         where("listId", "==", currentList),
@@ -636,9 +702,36 @@ export function ShoppingList() {
       );
 
       const querySnapshot = await getDocs(itemsQuery);
-      querySnapshot.forEach((doc) => {
-        batch.delete(doc.ref);
+      querySnapshot.forEach((itemDoc) => {
+        batch.delete(itemDoc.ref);
       });
+
+      // Eliminar al usuario de la división de gastos
+      const paymentsRef = doc(db, "listPayments", currentList);
+      const paymentsDoc = await getDoc(paymentsRef);
+
+      if (paymentsDoc.exists()) {
+        const paymentsData = paymentsDoc.data();
+        const currentPaymentParticipants = paymentsData.paymentParticipants || [];
+
+        // Filtrar al usuario eliminado de los participantes
+        const newPaymentParticipants = currentPaymentParticipants.filter(
+          participant => participant.email !== userToUnshare
+        );
+
+        // Eliminar también sus pagos registrados
+        const newPayments = { ...paymentsData.payments };
+        delete newPayments[userToUnshare];
+
+        // Actualizar el documento de pagos
+        batch.set(paymentsRef, {
+          ...paymentsData,
+          payments: newPayments,
+          paymentParticipants: newPaymentParticipants,
+          updatedAt: new Date(),
+          updatedBy: auth.currentUser?.email
+        }, { merge: true });
+      }
 
       await batch.commit();
 
@@ -703,6 +796,9 @@ export function ShoppingList() {
   // Función para finalizar compra - guardar precio total
   const finalizePurchase = async (listId, totalPrice) => {
     try {
+      // Guardar el currentList actual para asegurarnos de no perderlo
+      const currentListBeforeUpdate = currentList;
+
       if (totalPrice !== null) {
         const purchaseInfoData = {
           totalPrice: parseFloat(totalPrice),
@@ -732,6 +828,13 @@ export function ShoppingList() {
 
         showToast("Precio eliminado", 'info');
       }
+
+      // Asegurarse de que currentList no cambió durante la operación
+      if (currentList !== currentListBeforeUpdate) {
+        console.warn("currentList cambió durante finalizePurchase, restaurando...");
+        setCurrentList(currentListBeforeUpdate);
+      }
+
     } catch (error) {
       console.error("Error finalizando compra:", error);
       showToast("Error al guardar precio: " + error.message, 'error');
@@ -742,6 +845,7 @@ export function ShoppingList() {
   const loadInitialData = async (user) => {
     try {
       setLoading(true);
+      initialLoad.current = true; // Resetear el flag de carga inicial
 
       if (!listsCache.current.userLists.length) {
         listsCache.current.userLists = [];
@@ -754,16 +858,6 @@ export function ShoppingList() {
         loadUserLists(user),
         loadSharedLists(user)
       ]);
-
-      const allLists = [
-        ...listsCache.current.userLists,
-        ...listsCache.current.sharedLists
-      ];
-
-      // Si no hay lista actual pero hay listas disponibles, seleccionar la primera
-      if (allLists.length > 0 && !currentList) {
-        setCurrentList(allLists[0].id);
-      }
 
       return () => {
         userUnsubscribe();
@@ -789,13 +883,10 @@ export function ShoppingList() {
       listsCache.current.userLists = userLists;
       setLists(userLists);
 
-      // Si la lista actual fue eliminada y hay listas propias, seleccionar la primera
-      if (currentList && !userLists.some(list => list.id === currentList) && userLists.length > 0) {
+      // SOLO CAMBIAR LA LISTA ACTUAL EN LA CARGA INICIAL
+      if (initialLoad.current && userLists.length > 0 && !currentList) {
         setCurrentList(userLists[0].id);
-      }
-      // Si no hay lista actual pero hay listas propias, seleccionar la primera
-      else if (!currentList && userLists.length > 0) {
-        setCurrentList(userLists[0].id);
+        initialLoad.current = false;
       }
     });
 
@@ -818,11 +909,6 @@ export function ShoppingList() {
 
       listsCache.current.sharedLists = sharedListsData;
       setSharedLists(sharedListsData);
-
-      // Si la lista actual fue eliminada y no hay listas propias, limpiar currentList
-      if (currentList && !sharedListsData.some(list => list.id === currentList) && lists.length === 0) {
-        setCurrentList("");
-      }
     });
 
     return unsubscribe;
@@ -999,6 +1085,7 @@ export function ShoppingList() {
                 borderRadius: "8px",
                 border: "1px solid #e2e8f0",
                 background: "white",
+                color: "black",
                 cursor: "pointer"
               }}
             >
@@ -1016,6 +1103,7 @@ export function ShoppingList() {
                   borderRadius: "8px",
                   border: "1px solid #e2e8f0",
                   background: "white",
+                  color: "black",
                   cursor: "pointer"
                 }}
               >
@@ -1032,6 +1120,7 @@ export function ShoppingList() {
                 borderRadius: "8px",
                 border: "1px solid #e2e8f0",
                 background: "white",
+                color: "black",
                 cursor: "pointer"
               }}
             >
@@ -1475,10 +1564,93 @@ export function ShoppingList() {
         ];
         setAllPossibleParticipants(possibleParticipants);
 
-        // Inicialmente, todos los participantes posibles están en la división
-        setPaymentParticipants(possibleParticipants);
+        // Sincronizar automáticamente con los usuarios que tienen acceso
+        const paymentsRef = doc(db, "listPayments", currentList);
+        getDoc(paymentsRef).then((paymentsDoc) => {
+          if (paymentsDoc.exists()) {
+            const paymentsData = paymentsDoc.data();
+            const currentPaymentParticipants = paymentsData.paymentParticipants || [];
+
+            // Filtrar participantes que ya no tienen acceso a la lista
+            const validPaymentParticipants = currentPaymentParticipants.filter(
+              participant =>
+                participant.email === currentListData.ownerEmail ||
+                currentListData.sharedWith?.includes(participant.email)
+            );
+
+            // Si hay diferencias, actualizar Firestore
+            if (validPaymentParticipants.length !== currentPaymentParticipants.length) {
+              setDoc(paymentsRef, {
+                ...paymentsData,
+                paymentParticipants: validPaymentParticipants,
+                updatedAt: new Date()
+              }, { merge: true });
+            }
+
+            setPaymentParticipants(validPaymentParticipants);
+          } else {
+            // Si no existe documento de pagos, usar todos los posibles participantes
+            setPaymentParticipants(possibleParticipants);
+          }
+        });
       }
     }, [currentListData]);
+
+    const cleanupPaymentParticipants = async () => {
+      if (!currentList) return;
+
+      try {
+        const listDoc = await getDoc(doc(db, "lists", currentList));
+        if (!listDoc.exists()) return;
+
+        const listData = listDoc.data();
+        const paymentsRef = doc(db, "listPayments", currentList);
+        const paymentsDoc = await getDoc(paymentsRef);
+
+        if (paymentsDoc.exists()) {
+          const paymentsData = paymentsDoc.data();
+          const currentPaymentParticipants = paymentsData.paymentParticipants || [];
+
+          // Filtrar participantes que ya no tienen acceso
+          const validPaymentParticipants = currentPaymentParticipants.filter(
+            participant =>
+              participant.email === listData.ownerEmail ||
+              listData.sharedWith?.includes(participant.email)
+          );
+
+          // Si hay usuarios que limpiar, actualizar Firestore
+          if (validPaymentParticipants.length !== currentPaymentParticipants.length) {
+            const newPayments = { ...paymentsData.payments };
+
+            // Eliminar pagos de usuarios sin acceso
+            currentPaymentParticipants.forEach(participant => {
+              if (!validPaymentParticipants.some(p => p.email === participant.email)) {
+                delete newPayments[participant.email];
+              }
+            });
+
+            await setDoc(paymentsRef, {
+              ...paymentsData,
+              payments: newPayments,
+              paymentParticipants: validPaymentParticipants,
+              updatedAt: new Date(),
+              updatedBy: auth.currentUser?.email
+            }, { merge: true });
+
+            console.log("Usuarios sin acceso eliminados de la división de gastos");
+          }
+        }
+      } catch (error) {
+        console.error("Error limpiando participantes de pagos:", error);
+      }
+    };
+
+    // Llama a esta función cuando se cargue la lista
+    useEffect(() => {
+      if (currentList) {
+        cleanupPaymentParticipants();
+      }
+    }, [currentList]);
 
     // SUSCRIPCIÓN EN TIEMPO REAL A LOS PAGOS
     useEffect(() => {
@@ -1977,7 +2149,7 @@ export function ShoppingList() {
                             minWidth: '80px'
                           }}
                         >
-                          {payments[participant.email]?.paid ? '✅ Pagado' : '❌ Pendiente'}
+                          {payments[participant.email]?.paid ? 'Pagado' : 'Pendiente'}
                         </button>
 
                         {/* Botón eliminar SOLO de la división (solo para no propietarios) */}
@@ -2301,7 +2473,7 @@ export function ShoppingList() {
                     title={isCurrentListShared() ? "No puedes compartir una lista compartida" : "Compartir lista"}
                     style={{
                       padding: '8px 12px',
-                      border: '1px solid #E5E7EB',
+                      border: '1px solid #5f94ffff',
                       borderRadius: '8px',
                       backgroundColor: 'white',
                       cursor: isCurrentListShared() ? 'not-allowed' : 'pointer',
@@ -2314,7 +2486,7 @@ export function ShoppingList() {
                       transition: 'all 0.2s',
                       minWidth: 'fit-content',
                       color: "black",
-                      borderColor: ""
+                      borderColor: "#5f94ffff"
                     }}
                     onMouseEnter={(e) => {
                       if (!isCurrentListShared()) {
