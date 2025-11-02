@@ -6,6 +6,8 @@ import { doc, updateDoc, setDoc } from "firebase/firestore";
 import { signOut, onAuthStateChanged } from "firebase/auth";
 import { ToastContainer, toast } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
+import { FileText, Users, ShoppingCart } from "lucide-react";
+
 
 export function ShoppingList() {
   // Estados principales de la aplicación
@@ -15,6 +17,7 @@ export function ShoppingList() {
   const [currentList, setCurrentList] = useState(""); // Lista actualmente seleccionada
   const [loading, setLoading] = useState(false); // Estado de carga
   const [error, setError] = useState(null); // Manejo de errores
+  const [purchaseInfo, setPurchaseInfo] = useState({});
 
   // Estados para confirmaciones y diálogos
   const [confirmDelete, setConfirmDelete] = useState(null); // Confirmación eliminar producto
@@ -26,8 +29,14 @@ export function ShoppingList() {
   const [userToUnshare, setUserToUnshare] = useState(""); // Usuario para dejar de compartir
   const [userReady, setUserReady] = useState(false); // Usuario autenticado y listo
 
-  // Estados para validación
+  // Estados para validación y observaciones
   const [emailValidation, setEmailValidation] = useState({ valid: true, message: "" });
+  const [listObservations, setListObservations] = useState({}); // Observaciones por lista
+  const [observationsDialogOpen, setObservationsDialogOpen] = useState(false); // Diálogo observaciones
+  const [finalizeDialogOpen, setFinalizeDialogOpen] = useState(false); // Diálogo finalizar compra
+  const [splitDialogOpen, setSplitDialogOpen] = useState(false); // Diálogo dividir gastos
+  const [editingObservations, setEditingObservations] = useState(false); // Modo edición observaciones
+  const initialLoad = useRef(true);
 
   // Referencias para cache
   const itemsCache = useRef({});
@@ -210,6 +219,64 @@ export function ShoppingList() {
     console.log("Lista actual:", currentList);
   }, [currentList]);
 
+  // También puedes agregar una verificación en el efecto de carga de items
+  useEffect(() => {
+    if (!currentList) {
+      setItems([]);
+      return;
+    }
+
+    console.log("Cargando items para lista:", currentList);
+
+    const q = query(
+      collection(db, "items"),
+      where("listId", "==", currentList)
+    );
+
+    const unsubscribe = onSnapshot(q,
+      (snapshot) => {
+        // Verificar que todavía estamos en la misma lista
+        if (!currentList) return;
+
+        const updatedItems = snapshot.docs.map(doc => {
+          const data = doc.data();
+
+          // Asegurar que todos los campos necesarios existen
+          const categoryInfo = getCategoryInfo(data.category || "OTHER");
+
+          return {
+            id: doc.id,
+            text: data.text || "",
+            listId: data.listId || currentList,
+            userId: data.userId || "",
+            addedBy: data.addedBy || "",
+            completed: data.completed || false,
+            purchasedBy: data.purchasedBy || "",
+            purchasedAt: data.purchasedAt || null,
+            category: data.category || "OTHER",
+            createdAt: data.createdAt || new Date(),
+            categoryColor: categoryInfo.color,
+            categoryIcon: categoryInfo.icon,
+            isOptimistic: false
+          };
+        });
+
+        // Combinar con items optimistas
+        const optimisticItems = items.filter(item =>
+          item.isOptimistic && item.listId === currentList
+        );
+        const combinedItems = [...optimisticItems, ...updatedItems];
+        setItems(combinedItems);
+      },
+      (error) => {
+        setError(`Error al cargar productos: ${error.message}`);
+        showToast(`Error al cargar productos: ${error.message}`, 'error');
+      }
+    );
+
+    return unsubscribe;
+  }, [currentList]);
+
   // Crear una nueva lista de compras
   const createElegantList = async (listName) => {
     if (!auth.currentUser?.uid || !listName.trim()) {
@@ -390,6 +457,47 @@ export function ShoppingList() {
     }
   };
 
+  // Cargar observaciones de la lista desde Firebase
+  const loadListObservations = async (listId) => {
+    try {
+      const obsDoc = await getDoc(doc(db, "listObservations", listId));
+      if (obsDoc.exists()) {
+        const observations = obsDoc.data().observations || "";
+        setListObservations(prev => ({
+          ...prev,
+          [listId]: observations
+        }));
+      } else {
+        setListObservations(prev => ({
+          ...prev,
+          [listId]: ""
+        }));
+      }
+    } catch (error) {
+      console.error("Error cargando observaciones:", error);
+    }
+  };
+
+  // Guardar observaciones de la lista en Firebase
+  const saveListObservations = async (listId, observations) => {
+    try {
+      await setDoc(doc(db, "listObservations", listId), {
+        observations: observations,
+        updatedAt: new Date(),
+        updatedBy: auth.currentUser?.email || ""
+      });
+
+      setListObservations(prev => ({
+        ...prev,
+        [listId]: observations
+      }));
+      showToast('Observaciones guardadas', 'success');
+    } catch (error) {
+      console.error("Error guardando observaciones:", error);
+      showToast("Error al guardar observaciones: " + error.message, 'error');
+    }
+  };
+
   // Eliminar un producto de la lista
   const deleteItem = async (id) => {
     try {
@@ -458,10 +566,20 @@ export function ShoppingList() {
         batch.delete(doc(db, "items", itemDoc.id));
       });
 
+      // Eliminar observaciones de la lista
+      batch.delete(doc(db, "listObservations", listId));
+
       // Eliminar la lista
       batch.delete(doc(db, "lists", listId));
 
       await batch.commit();
+
+      // Limpiar el estado local de observaciones
+      setListObservations(prev => {
+        const newObservations = { ...prev };
+        delete newObservations[listId];
+        return newObservations;
+      });
 
       setConfirmListDelete(null);
 
@@ -588,6 +706,33 @@ export function ShoppingList() {
         batch.delete(itemDoc.ref);
       });
 
+      // Eliminar al usuario de la división de gastos
+      const paymentsRef = doc(db, "listPayments", currentList);
+      const paymentsDoc = await getDoc(paymentsRef);
+
+      if (paymentsDoc.exists()) {
+        const paymentsData = paymentsDoc.data();
+        const currentPaymentParticipants = paymentsData.paymentParticipants || [];
+
+        // Filtrar al usuario eliminado de los participantes
+        const newPaymentParticipants = currentPaymentParticipants.filter(
+          participant => participant.email !== userToUnshare
+        );
+
+        // Eliminar también sus pagos registrados
+        const newPayments = { ...paymentsData.payments };
+        delete newPayments[userToUnshare];
+
+        // Actualizar el documento de pagos
+        batch.set(paymentsRef, {
+          ...paymentsData,
+          payments: newPayments,
+          paymentParticipants: newPaymentParticipants,
+          updatedAt: new Date(),
+          updatedBy: auth.currentUser?.email
+        }, { merge: true });
+      }
+
       await batch.commit();
 
       setUnshareDialogOpen(false);
@@ -601,6 +746,13 @@ export function ShoppingList() {
   };
 
   // Efectos para carga de datos
+  useEffect(() => {
+    if (currentList) {
+      loadListObservations(currentList);
+      loadPurchaseInfo(currentList);
+    }
+  }, [currentList]);
+
   useEffect(() => {
     const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
       if (user) {
@@ -625,10 +777,75 @@ export function ShoppingList() {
     listsCache.current = { userLists: [], sharedLists: [] };
   };
 
+  // Función para cargar información de compra
+  const loadPurchaseInfo = async (listId) => {
+    try {
+      const listDoc = await getDoc(doc(db, "lists", listId));
+      if (listDoc.exists()) {
+        const data = listDoc.data();
+        setPurchaseInfo(prev => ({
+          ...prev,
+          [listId]: data.purchaseInfo || null
+        }));
+      }
+    } catch (error) {
+      console.error("Error cargando información de compra:", error);
+    }
+  };
+
+  // Función para finalizar compra - guardar precio total
+  const finalizePurchase = async (listId, totalPrice) => {
+    try {
+      // Guardar el currentList actual para asegurarnos de no perderlo
+      const currentListBeforeUpdate = currentList;
+
+      if (totalPrice !== null) {
+        const purchaseInfoData = {
+          totalPrice: parseFloat(totalPrice),
+          finalizedAt: new Date(),
+          finalizedBy: auth.currentUser?.email || "",
+        };
+
+        await updateDoc(doc(db, "lists", listId), {
+          purchaseInfo: purchaseInfoData
+        });
+
+        setPurchaseInfo(prev => ({
+          ...prev,
+          [listId]: purchaseInfoData
+        }));
+
+        showToast(`Precio guardado: ${totalPrice} €`, 'success');
+      } else {
+        await updateDoc(doc(db, "lists", listId), {
+          purchaseInfo: null
+        });
+
+        setPurchaseInfo(prev => ({
+          ...prev,
+          [listId]: null
+        }));
+
+        showToast("Precio eliminado", 'info');
+      }
+
+      // Asegurarse de que currentList no cambió durante la operación
+      if (currentList !== currentListBeforeUpdate) {
+        console.warn("currentList cambió durante finalizePurchase, restaurando...");
+        setCurrentList(currentListBeforeUpdate);
+      }
+
+    } catch (error) {
+      console.error("Error finalizando compra:", error);
+      showToast("Error al guardar precio: " + error.message, 'error');
+    }
+  };
+
   // Cargar datos iniciales del usuario
   const loadInitialData = async (user) => {
     try {
       setLoading(true);
+      initialLoad.current = true; // Resetear el flag de carga inicial
 
       if (!listsCache.current.userLists.length) {
         listsCache.current.userLists = [];
@@ -666,8 +883,10 @@ export function ShoppingList() {
       listsCache.current.userLists = userLists;
       setLists(userLists);
 
-      if (userLists.length > 0 && !currentList) {
+      // SOLO CAMBIAR LA LISTA ACTUAL EN LA CARGA INICIAL
+      if (initialLoad.current && userLists.length > 0 && !currentList) {
         setCurrentList(userLists[0].id);
+        initialLoad.current = false;
       }
     });
 
@@ -843,6 +1062,99 @@ export function ShoppingList() {
     return a.text.localeCompare(b.text);
   });
 
+
+  // Componente para la sección de información de la lista
+  const ListInfoSection = () => {
+    if (!currentList) return null;
+
+    const currentObservations = listObservations[currentList] || "";
+    const currentPurchaseInfo = purchaseInfo[currentList];
+    const isSharedList = isCurrentListShared() || isCurrentListSharedByMe();
+
+    return (
+      <div className="list-info-section" style={{ marginBottom: "3%" }}>
+        <div className="list-info-header">
+          <h4 style={{ color: "black" }}>Información de la Lista</h4>
+          <div className="list-info-actions">
+            <button
+              onClick={() => setObservationsDialogOpen(true)}
+              className="action-btn"
+              title="Observaciones"
+              style={{
+                padding: "8px",
+                borderRadius: "8px",
+                border: "1px solid #e2e8f0",
+                background: "white",
+                color: "black",
+                cursor: "pointer"
+              }}
+            >
+              <FileText size={24} /> {/* más grande */}
+            </button>
+
+            {/* Botón de Dividir Gastos - solo visible en listas compartidas */}
+            {isSharedList && (
+              <button
+                onClick={() => setSplitDialogOpen(true)}
+                className="action-btn"
+                title="Dividir Gastos"
+                style={{
+                  padding: "8px",
+                  borderRadius: "8px",
+                  border: "1px solid #e2e8f0",
+                  background: "white",
+                  color: "black",
+                  cursor: "pointer"
+                }}
+              >
+                <Users size={24} />
+              </button>
+            )}
+
+            <button
+              onClick={() => setFinalizeDialogOpen(true)}
+              className="action-btn"
+              title="Finalizar Compra"
+              style={{
+                padding: "8px",
+                borderRadius: "8px",
+                border: "1px solid #e2e8f0",
+                background: "white",
+                color: "black",
+                cursor: "pointer"
+              }}
+            >
+              <ShoppingCart size={24} />
+            </button>
+          </div>
+        </div>
+
+        {/* Muestra el precio total si existe */}
+        {currentPurchaseInfo?.totalPrice && (
+          <div className="total-price-info" style={{ marginBottom: "12px" }}>
+            <strong style={{ color: "black" }}>Precio total: </strong>
+            <span style={{
+              color: "#10B981",
+              fontWeight: "bold",
+              fontSize: "16px"
+            }}>
+              {currentPurchaseInfo.totalPrice.toFixed(2)} €
+            </span>
+          </div>
+        )}
+
+        {currentObservations && (
+          <div className="observations-preview">
+            <strong style={{ color: "black" }}>Observaciones:</strong>
+            <p style={{ color: "black" }}>{currentObservations.length > 100
+              ? currentObservations.substring(0, 100) + "..."
+              : currentObservations}</p>
+          </div>
+        )}
+      </div>
+    );
+  };
+
   // Agrupar items por categoría para mostrar organizadamente
   const groupItemsByCategory = (itemsList) => {
     const grouped = {};
@@ -861,6 +1173,8 @@ export function ShoppingList() {
   const pendingItems = sortedItems.filter(item => !item.completed);
   const completedItems = sortedItems.filter(item => item.completed);
   const groupedPendingItems = groupItemsByCategory(pendingItems);
+
+
 
   // Componente elegante para renderizar items individuales 
   const ElegantItem = ({ item }) => {
@@ -1206,6 +1520,731 @@ export function ShoppingList() {
           </svg>
           <span className="button-text">Añadir</span>
         </button>
+      </div>
+    );
+  };
+
+  // Componente para el contenido del diálogo de división de gastos
+  const SplitDialogContent = () => {
+    const isSharedList = isCurrentListShared() || isCurrentListSharedByMe();
+    const currentPurchaseInfo = purchaseInfo[currentList];
+    const totalPrice = currentPurchaseInfo?.totalPrice;
+
+    // Obtener participantes dinámicamente
+    const currentListData = allLists.find(list => list.id === currentList);
+    const [allPossibleParticipants, setAllPossibleParticipants] = useState([]);
+    const [paymentParticipants, setPaymentParticipants] = useState([]);
+    const [payments, setPayments] = useState({});
+    const [isOwner, setIsOwner] = useState(false);
+
+    // Verificar si el usuario actual es el propietario
+    useEffect(() => {
+      if (currentListData && auth.currentUser) {
+        const owner = currentListData.userId === auth.currentUser.uid;
+        setIsOwner(owner);
+      }
+    }, [currentListData, auth.currentUser]);
+
+    // Cargar todos los posibles participantes (propietario + sharedWith)
+    useEffect(() => {
+      if (currentListData) {
+        const possibleParticipants = [
+          {
+            email: currentListData.ownerEmail || auth.currentUser?.email,
+            name: (currentListData.ownerEmail || auth.currentUser?.email)?.split('@')[0] || 'Tú',
+            isOwner: true,
+            userId: currentListData.userId
+          },
+          ...(currentListData.sharedWith || []).map(email => ({
+            email,
+            name: email.split('@')[0],
+            isOwner: false,
+            userId: null
+          }))
+        ];
+        setAllPossibleParticipants(possibleParticipants);
+
+        // Sincronizar automáticamente con los usuarios que tienen acceso
+        const paymentsRef = doc(db, "listPayments", currentList);
+        getDoc(paymentsRef).then((paymentsDoc) => {
+          if (paymentsDoc.exists()) {
+            const paymentsData = paymentsDoc.data();
+            const currentPaymentParticipants = paymentsData.paymentParticipants || [];
+
+            // Filtrar participantes que ya no tienen acceso a la lista
+            const validPaymentParticipants = currentPaymentParticipants.filter(
+              participant =>
+                participant.email === currentListData.ownerEmail ||
+                currentListData.sharedWith?.includes(participant.email)
+            );
+
+            // Si hay diferencias, actualizar Firestore
+            if (validPaymentParticipants.length !== currentPaymentParticipants.length) {
+              setDoc(paymentsRef, {
+                ...paymentsData,
+                paymentParticipants: validPaymentParticipants,
+                updatedAt: new Date()
+              }, { merge: true });
+            }
+
+            setPaymentParticipants(validPaymentParticipants);
+          } else {
+            // Si no existe documento de pagos, usar todos los posibles participantes
+            setPaymentParticipants(possibleParticipants);
+          }
+        });
+      }
+    }, [currentListData]);
+
+    const cleanupPaymentParticipants = async () => {
+      if (!currentList) return;
+
+      try {
+        const listDoc = await getDoc(doc(db, "lists", currentList));
+        if (!listDoc.exists()) return;
+
+        const listData = listDoc.data();
+        const paymentsRef = doc(db, "listPayments", currentList);
+        const paymentsDoc = await getDoc(paymentsRef);
+
+        if (paymentsDoc.exists()) {
+          const paymentsData = paymentsDoc.data();
+          const currentPaymentParticipants = paymentsData.paymentParticipants || [];
+
+          // Filtrar participantes que ya no tienen acceso
+          const validPaymentParticipants = currentPaymentParticipants.filter(
+            participant =>
+              participant.email === listData.ownerEmail ||
+              listData.sharedWith?.includes(participant.email)
+          );
+
+          // Si hay usuarios que limpiar, actualizar Firestore
+          if (validPaymentParticipants.length !== currentPaymentParticipants.length) {
+            const newPayments = { ...paymentsData.payments };
+
+            // Eliminar pagos de usuarios sin acceso
+            currentPaymentParticipants.forEach(participant => {
+              if (!validPaymentParticipants.some(p => p.email === participant.email)) {
+                delete newPayments[participant.email];
+              }
+            });
+
+            await setDoc(paymentsRef, {
+              ...paymentsData,
+              payments: newPayments,
+              paymentParticipants: validPaymentParticipants,
+              updatedAt: new Date(),
+              updatedBy: auth.currentUser?.email
+            }, { merge: true });
+
+            console.log("Usuarios sin acceso eliminados de la división de gastos");
+          }
+        }
+      } catch (error) {
+        console.error("Error limpiando participantes de pagos:", error);
+      }
+    };
+
+    // Llama a esta función cuando se cargue la lista
+    useEffect(() => {
+      if (currentList) {
+        cleanupPaymentParticipants();
+      }
+    }, [currentList]);
+
+    // SUSCRIPCIÓN EN TIEMPO REAL A LOS PAGOS
+    useEffect(() => {
+      if (!currentList) return;
+
+      const unsubscribe = onSnapshot(
+        doc(db, "listPayments", currentList),
+        (doc) => {
+          if (doc.exists()) {
+            const paymentData = doc.data();
+            console.log("Actualización en tiempo real de pagos:", paymentData);
+            setPayments(paymentData.payments || {});
+
+            // Cargar la lista de participantes de la división desde Firebase
+            if (paymentData.paymentParticipants) {
+              setPaymentParticipants(paymentData.paymentParticipants);
+            }
+          } else {
+            setPayments({});
+          }
+        },
+        (error) => {
+          console.error("Error en suscripción de pagos:", error);
+        }
+      );
+
+      return () => unsubscribe();
+    }, [currentList]);
+
+    // Función para guardar estado de pago (SOLO PROPIETARIO)
+    const savePaymentStatus = async (email, paid) => {
+      if (!isOwner) {
+        showToast("Solo el propietario puede marcar pagos", 'error');
+        return;
+      }
+
+      try {
+        const newPayments = {
+          ...payments,
+          [email]: {
+            paid,
+            paidAt: paid ? new Date() : null,
+            paidBy: auth.currentUser?.email,
+            updatedAt: new Date()
+          }
+        };
+
+        await savePaymentsToFirebase(newPayments, paymentParticipants);
+        showToast(`Estado de pago ${paid ? 'actualizado' : 'revertido'}`, 'success');
+      } catch (error) {
+        console.error("Error guardando estado de pago:", error);
+        showToast("Error al actualizar estado de pago", 'error');
+      }
+    };
+
+    // Función para guardar en Firebase
+    const savePaymentsToFirebase = async (paymentsData, participantsData) => {
+      await setDoc(doc(db, "listPayments", currentList), {
+        payments: paymentsData,
+        paymentParticipants: participantsData,
+        updatedAt: new Date(),
+        updatedBy: auth.currentUser?.email,
+        listId: currentList,
+        listName: currentListData?.name
+      }, { merge: true });
+    };
+
+    // Función para ELIMINAR SOLO DE LA DIVISIÓN DE GASTOS
+    const removeFromPaymentSplit = async (email) => {
+      if (!isOwner) {
+        showToast("Solo el propietario puede eliminar participantes de la división", 'error');
+        return;
+      }
+
+      const participant = paymentParticipants.find(p => p.email === email);
+      if (participant?.isOwner) {
+        showToast("No puedes eliminar al propietario de la división", 'error');
+        return;
+      }
+
+      try {
+        // Crear nueva lista sin el participante eliminado
+        const newPaymentParticipants = paymentParticipants.filter(p => p.email !== email);
+
+        // Eliminar también sus pagos
+        const newPayments = { ...payments };
+        delete newPayments[email];
+
+        // Guardar en Firebase
+        await savePaymentsToFirebase(newPayments, newPaymentParticipants);
+
+        // La actualización vendrá automáticamente por onSnapshot
+        showToast(`${email} eliminado de la división de gastos`, 'success');
+      } catch (error) {
+        console.error("Error eliminando participante de la división:", error);
+        showToast("Error al eliminar participante de la división", 'error');
+      }
+    };
+
+    // Función para AÑADIR participante a la división de gastos
+    const addToPaymentSplit = async (email) => {
+      if (!isOwner) {
+        showToast("Solo el propietario puede añadir participantes a la división", 'error');
+        return;
+      }
+
+      if (!email.trim() || !isValidEmail(email)) {
+        showToast("Email inválido", 'error');
+        return;
+      }
+
+      // Verificar si ya está en la división
+      if (paymentParticipants.some(p => p.email === email)) {
+        showToast("Este usuario ya está en la división de gastos", 'warning');
+        return;
+      }
+
+      try {
+        // Buscar si el usuario está en los posibles participantes
+        const existingParticipant = allPossibleParticipants.find(p => p.email === email);
+
+        let newParticipant;
+        if (existingParticipant) {
+          // Si ya existe en sharedWith, usar sus datos
+          newParticipant = existingParticipant;
+        } else {
+          // Si es un nuevo email, crear participante
+          newParticipant = {
+            email: email.trim(),
+            name: email.split('@')[0],
+            isOwner: false,
+            userId: null
+          };
+
+          // También añadirlo a los posibles participantes
+          setAllPossibleParticipants(prev => [...prev, newParticipant]);
+        }
+
+        // Añadir a la lista de participantes de la división
+        const newPaymentParticipants = [...paymentParticipants, newParticipant];
+
+        // Guardar en Firebase
+        await savePaymentsToFirebase(payments, newPaymentParticipants);
+
+        showToast(`${email} añadido a la división de gastos`, 'success');
+      } catch (error) {
+        console.error("Error añadiendo participante a la división:", error);
+        showToast("Error al añadir participante a la división", 'error');
+      }
+    };
+
+    // Función para REAÑADIR un participante que fue eliminado
+    const readdToPaymentSplit = async (email) => {
+      if (!isOwner) {
+        showToast("Solo el propietario puede reañadir participantes", 'error');
+        return;
+      }
+
+      try {
+        // Buscar el participante en los posibles participantes
+        const participantToAdd = allPossibleParticipants.find(p => p.email === email);
+
+        if (!participantToAdd) {
+          showToast("No se encontró el participante", 'error');
+          return;
+        }
+
+        // Añadir a la lista de participantes de la división
+        const newPaymentParticipants = [...paymentParticipants, participantToAdd];
+
+        // Guardar en Firebase
+        await savePaymentsToFirebase(payments, newPaymentParticipants);
+
+        showToast(`${email} reañadido a la división de gastos`, 'success');
+      } catch (error) {
+        console.error("Error reañadiendo participante:", error);
+        showToast("Error al reañadir participante", 'error');
+      }
+    };
+
+    // Calcular precio por persona
+    const sharePerPerson = totalPrice && paymentParticipants.length > 0
+      ? totalPrice / paymentParticipants.length
+      : 0;
+
+    // Calcular resumen de pagos
+    const paymentSummary = {
+      total: paymentParticipants.length,
+      paid: Object.values(payments).filter(p => p.paid).length,
+      pending: paymentParticipants.length - Object.values(payments).filter(p => p.paid).length,
+      totalCollected: Object.values(payments).filter(p => p.paid).length * sharePerPerson,
+      totalPending: (paymentParticipants.length - Object.values(payments).filter(p => p.paid).length) * sharePerPerson
+    };
+
+    // Encontrar participantes que están en la lista pero no en la división
+    const excludedParticipants = allPossibleParticipants.filter(
+      p => !paymentParticipants.some(pp => pp.email === p.email)
+    );
+
+    // Encontrar el estado de pago del usuario actual
+    const currentUserPayment = payments[auth.currentUser?.email] || { paid: false };
+
+    if (!isSharedList) {
+      return (
+        <div className="dialog-content" style={{ padding: '24px', flex: 1, overflowY: 'auto', background: 'white' }}>
+          <div style={{ textAlign: 'center', padding: '20px' }}>
+            <div style={{ width: '64px', height: '64px', margin: '0 auto 16px', backgroundColor: '#f3f4f6', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '24px', color: '#6b7280' }}>
+              👥
+            </div>
+            <p style={{ color: '#374151', marginBottom: '8px', fontSize: '16px', fontWeight: '500' }}>
+              Solo disponible para listas compartidas
+            </p>
+          </div>
+        </div>
+      );
+    }
+
+    // VISTA PARA USUARIOS NO PROPIETARIOS (solo ven su información)
+    if (!isOwner) {
+      return (
+        <div className="dialog-content" style={{ padding: '24px', flex: 1, overflowY: 'auto', background: 'white' }}>
+          <div style={{ marginBottom: '20px' }}>
+            <h4 style={{ color: '#1f2937', marginBottom: '16px', fontSize: '18px', fontWeight: '600' }}>
+              Mi Pago - División de Gastos
+            </h4>
+
+            {!totalPrice ? (
+              <div style={{ textAlign: 'center', padding: '20px', backgroundColor: '#f8fafc', borderRadius: '8px', border: '1px solid #e5e7eb' }}>
+                <div style={{ width: '48px', height: '48px', margin: '0 auto 12px', backgroundColor: '#f3f4f6', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '20px', color: '#6b7280' }}>
+                  💰
+                </div>
+                <p style={{ color: '#374151', marginBottom: '8px', fontSize: '16px', fontWeight: '500' }}>
+                  Precio total no establecido
+                </p>
+                <p style={{ color: '#6b7280', fontSize: '14px', marginBottom: '16px' }}>
+                  El propietario debe establecer el precio total para calcular la división
+                </p>
+              </div>
+            ) : (
+              <>
+                {/* Información personal del usuario */}
+                <div style={{
+                  backgroundColor: '#f8fafc',
+                  padding: '20px',
+                  borderRadius: '12px',
+                  border: '2px solid #e5e7eb',
+                  marginBottom: '20px',
+                  textAlign: 'center'
+                }}>
+                  <div style={{
+                    width: '60px',
+                    height: '60px',
+                    margin: '0 auto 12px',
+                    backgroundColor: currentUserPayment.paid ? '#10b981' : '#f59e0b',
+                    borderRadius: '50%',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontSize: '24px',
+                    color: 'white'
+                  }}>
+                    {currentUserPayment.paid ? '✓' : '€'}
+                  </div>
+
+                  <h5 style={{
+                    color: '#1f2937',
+                    fontSize: '18px',
+                    fontWeight: '700',
+                    marginBottom: '8px'
+                  }}>
+                    {currentUserPayment.paid ? '✅ PAGADO' : '⏳ PENDIENTE'}
+                  </h5>
+
+                  <div style={{
+                    fontSize: '24px',
+                    fontWeight: '700',
+                    color: '#1f2937',
+                    marginBottom: '8px'
+                  }}>
+                    {sharePerPerson.toFixed(2)} €
+                  </div>
+
+                  <p style={{
+                    color: '#6b7280',
+                    fontSize: '14px',
+                    margin: 0
+                  }}>
+                    Tu parte de {totalPrice.toFixed(2)} € entre {paymentParticipants.length} personas
+                  </p>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    // VISTA PARA EL PROPIETARIO (ve toda la información)
+    return (
+      <div className="dialog-content" style={{ padding: '24px', flex: 1, overflowY: 'auto', background: 'white' }}>
+        <div style={{ marginBottom: '20px' }}>
+          <h4 style={{ color: '#1f2937', marginBottom: '16px', fontSize: '18px', fontWeight: '600' }}>
+            División de Gastos - Gestión Completa
+          </h4>
+
+          {!totalPrice ? (
+            <div style={{ textAlign: 'center', padding: '20px', backgroundColor: '#f8fafc', borderRadius: '8px', border: '1px solid #e5e7eb' }}>
+              <div style={{ width: '48px', height: '48px', margin: '0 auto 12px', backgroundColor: '#f3f4f6', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '20px', color: '#6b7280' }}>
+                💰
+              </div>
+              <p style={{ color: '#374151', marginBottom: '8px', fontSize: '16px', fontWeight: '500' }}>
+                Precio total no establecido
+              </p>
+              <button
+                onClick={() => {
+                  setSplitDialogOpen(false);
+                  setFinalizeDialogOpen(true);
+                }}
+                className="blue-button"
+                style={{
+                  backgroundColor: '#3b82f6',
+                  color: 'white',
+                  border: 'none',
+                  padding: '8px 16px',
+                  borderRadius: '6px',
+                  cursor: 'pointer',
+                  fontWeight: '500',
+                  fontSize: '14px'
+                }}
+              >
+                Establecer Precio
+              </button>
+            </div>
+          ) : (
+            <>
+              {/* Resumen de gastos COMPLETO para propietario */}
+              <div style={{
+                backgroundColor: '#f8fafc',
+                padding: '16px',
+                borderRadius: '8px',
+                border: '1px solid #e5e7eb',
+                marginBottom: '20px'
+              }}>
+                <div style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
+                  gap: '12px',
+                  marginBottom: '16px'
+                }}>
+                  <div style={{
+                    backgroundColor: 'white',
+                    padding: '12px',
+                    borderRadius: '6px',
+                    border: '1px solid #d1d5db',
+                    textAlign: 'center'
+                  }}>
+                    <div style={{ fontSize: '12px', color: '#6b7280', marginBottom: '4px', fontWeight: '500' }}>
+                      TOTAL GASTADO
+                    </div>
+                    <div style={{ fontSize: '18px', fontWeight: '700', color: '#1f2937' }}>
+                      {totalPrice.toFixed(2)} €
+                    </div>
+                  </div>
+
+                  <div style={{
+                    backgroundColor: 'white',
+                    padding: '12px',
+                    borderRadius: '6px',
+                    border: '1px solid #d1d5db',
+                    textAlign: 'center'
+                  }}>
+                    <div style={{ fontSize: '12px', color: '#6b7280', marginBottom: '4px', fontWeight: '500' }}>
+                      PERSONAS
+                    </div>
+                    <div style={{ fontSize: '18px', fontWeight: '700', color: '#1f2937' }}>
+                      {paymentParticipants.length}
+                    </div>
+                  </div>
+
+                  <div style={{
+                    backgroundColor: '#10b981',
+                    padding: '12px',
+                    borderRadius: '6px',
+                    border: '1px solid #059669',
+                    textAlign: 'center'
+                  }}>
+                    <div style={{ fontSize: '12px', color: 'white', marginBottom: '4px', fontWeight: '500', opacity: 0.9 }}>
+                      POR PERSONA
+                    </div>
+                    <div style={{ fontSize: '18px', fontWeight: '700', color: 'white' }}>
+                      {sharePerPerson.toFixed(2)} €
+                    </div>
+                  </div>
+                </div>
+
+                {/* Resumen de pagos DETALLADO para propietario */}
+                <div style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
+                  gap: '8px',
+                  marginTop: '12px'
+                }}>
+                  <div style={{
+                    backgroundColor: '#dcfce7',
+                    padding: '8px',
+                    borderRadius: '6px',
+                    border: '1px solid #bbf7d0',
+                    textAlign: 'center'
+                  }}>
+                    <div style={{ fontSize: '11px', color: '#166534', marginBottom: '2px', fontWeight: '500' }}>
+                      PAGADO
+                    </div>
+                    <div style={{ fontSize: '14px', fontWeight: '700', color: '#166534' }}>
+                      {paymentSummary.paid}/{paymentSummary.total}
+                    </div>
+                  </div>
+
+                  <div style={{
+                    backgroundColor: '#fef3c7',
+                    padding: '8px',
+                    borderRadius: '6px',
+                    border: '1px solid #fde68a',
+                    textAlign: 'center'
+                  }}>
+                    <div style={{ fontSize: '11px', color: '#92400e', marginBottom: '2px', fontWeight: '500' }}>
+                      PENDIENTE
+                    </div>
+                    <div style={{ fontSize: '14px', fontWeight: '700', color: '#92400e' }}>
+                      {paymentSummary.pending}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Participantes en la división de gastos - VISTA COMPLETA DEL PROPIETARIO */}
+              <div style={{ marginBottom: '20px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                  <h5 style={{ color: '#374151', fontSize: '16px', fontWeight: '600' }}>
+                    Gestión de Participantes ({paymentParticipants.length})
+                  </h5>
+                  <button
+                    onClick={() => {
+                      const email = prompt("Introduce el email para añadir a la división de gastos:");
+                      if (email) addToPaymentSplit(email);
+                    }}
+                    style={{
+                      backgroundColor: '#3b82f6',
+                      color: 'white',
+                      border: 'none',
+                      padding: '6px 12px',
+                      borderRadius: '6px',
+                      cursor: 'pointer',
+                      fontSize: '12px',
+                      fontWeight: '500'
+                    }}
+                  >
+                    + Añadir
+                  </button>
+                </div>
+
+                <div style={{ maxHeight: '200px', overflowY: 'auto' }}>
+                  {paymentParticipants.map((participant, index) => (
+                    <div
+                      key={participant.email}
+                      style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        padding: '12px',
+                        backgroundColor: index % 2 === 0 ? '#f8fafc' : 'white',
+                        borderBottom: '1px solid #e5e7eb'
+                      }}
+                    >
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontWeight: '500', color: '#1f2937' }}>
+                          {participant.name} {participant.isOwner && '(Tú)'}
+                        </div>
+                        <div style={{ fontSize: '12px', color: '#6b7280' }}>
+                          {sharePerPerson.toFixed(2)} € • {participant.email}
+                        </div>
+                      </div>
+
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                        {/* Toggle de pago - Solo propietario puede cambiar */}
+                        <button
+                          onClick={() => savePaymentStatus(participant.email, !payments[participant.email]?.paid)}
+                          style={{
+                            backgroundColor: payments[participant.email]?.paid ? '#10b981' : '#ef4444',
+                            color: 'white',
+                            border: 'none',
+                            padding: '6px 12px',
+                            borderRadius: '6px',
+                            cursor: 'pointer',
+                            fontSize: '12px',
+                            fontWeight: '500',
+                            minWidth: '80px'
+                          }}
+                        >
+                          {payments[participant.email]?.paid ? 'Pagado' : 'Pendiente'}
+                        </button>
+
+                        {/* Botón eliminar SOLO de la división (solo para no propietarios) */}
+                        {!participant.isOwner && (
+                          <button
+                            onClick={() => removeFromPaymentSplit(participant.email)}
+                            style={{
+                              backgroundColor: 'transparent',
+                              color: '#ef4444',
+                              border: '1px solid #ef4444',
+                              padding: '4px 8px',
+                              borderRadius: '4px',
+                              cursor: 'pointer',
+                              fontSize: '11px'
+                            }}
+                            title="Eliminar de la división de gastos"
+                          >
+                            ✕
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Participantes excluidos de la división (solo visible para propietarios) */}
+              {excludedParticipants.length > 0 && (
+                <div style={{ marginBottom: '20px' }}>
+                  <h5 style={{ color: '#374151', fontSize: '16px', fontWeight: '600', marginBottom: '12px' }}>
+                    Excluidos de la división ({excludedParticipants.length})
+                  </h5>
+                  <div style={{ maxHeight: '150px', overflowY: 'auto' }}>
+                    {excludedParticipants.map((participant, index) => (
+                      <div
+                        key={participant.email}
+                        style={{
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          padding: '8px 12px',
+                          backgroundColor: index % 2 === 0 ? '#f8fafc' : 'white',
+                          borderBottom: '1px solid #e5e7eb'
+                        }}
+                      >
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontWeight: '500', color: '#6b7280' }}>
+                            {participant.name}
+                          </div>
+                          <div style={{ fontSize: '11px', color: '#9ca3af' }}>
+                            {participant.email}
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => readdToPaymentSplit(participant.email)}
+                          style={{
+                            backgroundColor: '#10b981',
+                            color: 'white',
+                            border: 'none',
+                            padding: '4px 8px',
+                            borderRadius: '4px',
+                            cursor: 'pointer',
+                            fontSize: '11px'
+                          }}
+                          title="Reañadir a la división de gastos"
+                        >
+                          + Añadir
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Información de gestión para propietarios */}
+              <div style={{
+                marginTop: '16px',
+                padding: '12px',
+                backgroundColor: '#dbeafe',
+                borderRadius: '6px',
+                border: '1px solid #93c5fd'
+              }}>
+                <p style={{
+                  color: '#1e40af',
+                  margin: 0,
+                  fontSize: '13px',
+                  lineHeight: '1.4'
+                }}>
+                  <strong>Eres el propietario</strong> - Puedes gestionar todos los pagos y participantes de la división.
+                  Los demás usuarios solo verán su información personal.
+                </p>
+              </div>
+            </>
+          )}
+        </div>
       </div>
     );
   };
@@ -1619,6 +2658,9 @@ export function ShoppingList() {
                       </span>
                     )}
                   </h4>
+
+                  {/* Sección de Información de la Lista */}
+                  <ListInfoSection />
                 </div>
               )}
             </div>
@@ -1733,6 +2775,7 @@ export function ShoppingList() {
                           }}>
                             {categoryInfo.name}
                           </h4>
+                          {/* CONTADOR ELIMINADO - Solo queda el nombre de la categoría */}
                         </div>
                         <ul className="elegant-items-list" style={{
                           listStyle: 'none',
@@ -2597,6 +3640,598 @@ export function ShoppingList() {
         </div>
       )}
 
+      {finalizeDialogOpen && (
+        <div className="modal-overlay" style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0, 0, 0, 0.6)',
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          zIndex: 9999
+        }}>
+          <div className="dialog-modal" style={{
+            backgroundColor: 'white',
+            borderRadius: '12px',
+            boxShadow: '0 10px 30px rgba(0, 0, 0, 0.3)',
+            width: '90%',
+            maxWidth: '500px',
+            maxHeight: '90vh',
+            display: 'flex',
+            flexDirection: 'column',
+            overflow: 'hidden'
+          }}>
+            <div className="dialog-header" style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              padding: '20px 24px 0',
+              borderBottom: '1px solid #e5e7eb',
+              marginBottom: 0,
+              background: 'white'
+            }}>
+              <h3 style={{
+                margin: 0,
+                fontSize: '1.25rem',
+                fontWeight: '600',
+                color: '#1f2937'
+              }}>
+                Finalizar Compra
+              </h3>
+              <button
+                onClick={() => setFinalizeDialogOpen(false)}
+                className="close-btn"
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  fontSize: '1.5rem',
+                  cursor: 'pointer',
+                  color: '#6b7280',
+                  padding: '4px',
+                  borderRadius: '4px',
+                  transition: 'all 0.2s',
+                  lineHeight: 1,
+                  width: '32px',
+                  height: '32px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center'
+                }}
+                onMouseEnter={(e) => {
+                  e.target.style.backgroundColor = '#f3f4f6';
+                  e.target.style.color = '#374151';
+                }}
+                onMouseLeave={(e) => {
+                  e.target.style.backgroundColor = 'transparent';
+                  e.target.style.color = '#6b7280';
+                }}
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="dialog-content" style={{
+              padding: '24px',
+              flex: 1,
+              overflowY: 'auto',
+              background: 'white'
+            }}>
+              <p style={{ color: 'black', marginBottom: '16px' }}>
+                Introduce el precio total de la compra:
+              </p>
+              <input
+                type="number"
+                step="0.01"
+                min="0"
+                value={purchaseInfo[currentList]?.totalPrice?.toString() || ""}
+                onChange={(e) => {
+                  const price = e.target.value;
+                  setPurchaseInfo(prev => ({
+                    ...prev,
+                    [currentList]: price ? {
+                      ...prev[currentList],
+                      totalPrice: parseFloat(price)
+                    } : null
+                  }));
+                }}
+                placeholder="Precio total (ej: 45.50)"
+                className="elegant-input"
+                style={{
+                  color: 'black',
+                  width: '100%',
+                  padding: '12px',
+                  border: '1px solid #d1d5db',
+                  borderRadius: '8px',
+                  fontSize: '16px'
+                }}
+              />
+
+              {purchaseInfo[currentList]?.totalPrice && (
+                <div style={{
+                  marginTop: '16px',
+                  padding: '12px',
+                  backgroundColor: '#f0f9ff',
+                  borderRadius: '8px',
+                  border: '1px solid #bae6fd'
+                }}>
+                  <p style={{
+                    color: '#0369a1',
+                    margin: 0,
+                    fontSize: '14px'
+                  }}>
+                    💡 El precio total se mostrará en la información de la lista y podrás usarlo para dividir gastos.
+                  </p>
+                </div>
+              )}
+            </div>
+
+            <div className="dialog-buttons" style={{
+              display: 'flex',
+              gap: '12px',
+              justifyContent: 'flex-end',
+              padding: '0 24px 24px',
+              flexWrap: 'wrap',
+              background: 'white'
+            }}>
+              <button
+                onClick={() => setFinalizeDialogOpen(false)}
+                className="cancel-btn"
+                style={{
+                  backgroundColor: '#f3f4f6',
+                  color: '#374151',
+                  border: '1px solid #d1d5db',
+                  padding: '10px 20px',
+                  borderRadius: '8px',
+                  cursor: 'pointer',
+                  fontWeight: '500',
+                  transition: 'all 0.2s',
+                  minWidth: '80px'
+                }}
+                onMouseEnter={(e) => {
+                  e.target.style.backgroundColor = '#e5e7eb';
+                  e.target.style.borderColor = '#9ca3af';
+                }}
+                onMouseLeave={(e) => {
+                  e.target.style.backgroundColor = '#f3f4f6';
+                  e.target.style.borderColor = '#d1d5db';
+                }}
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={() => {
+                  const price = purchaseInfo[currentList]?.totalPrice;
+                  finalizePurchase(currentList, price);
+                  setFinalizeDialogOpen(false);
+                }}
+                className="blue-button"
+                style={{
+                  backgroundColor: '#3b82f6',
+                  color: 'white',
+                  border: 'none',
+                  padding: '10px 20px',
+                  borderRadius: '8px',
+                  cursor: 'pointer',
+                  fontWeight: '500',
+                  transition: 'all 0.2s',
+                  minWidth: '100px'
+                }}
+                onMouseEnter={(e) => {
+                  e.target.style.backgroundColor = '#2563eb';
+                }}
+                onMouseLeave={(e) => {
+                  e.target.style.backgroundColor = '#3b82f6';
+                }}
+              >
+                {purchaseInfo[currentList]?.totalPrice ? 'Guardar Precio' : 'Eliminar Precio'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Observaciones */}
+      {observationsDialogOpen && (
+        <div className="modal-overlay" style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0, 0, 0, 0.6)',
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          zIndex: 9999
+        }}>
+          <div className="dialog-modal" style={{
+            backgroundColor: 'white',
+            borderRadius: '12px',
+            boxShadow: '0 10px 30px rgba(0, 0, 0, 0.3)',
+            width: '90%',
+            maxWidth: '500px',
+            maxHeight: '90vh',
+            display: 'flex',
+            flexDirection: 'column',
+            overflow: 'hidden'
+          }}>
+            <div className="dialog-header" style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              padding: '20px 24px 0',
+              borderBottom: '1px solid #e5e7eb',
+              marginBottom: 0,
+              background: 'white'
+            }}>
+              <h3 style={{
+                margin: 0,
+                fontSize: '1.25rem',
+                fontWeight: '600',
+                color: '#1f2937'
+              }}>
+                Observaciones - {allLists.find(list => list.id === currentList)?.name || "Lista actual"}
+              </h3>
+              <button
+                onClick={() => {
+                  setObservationsDialogOpen(false);
+                  setEditingObservations(false);
+                }}
+                className="close-btn"
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  fontSize: '1.5rem',
+                  cursor: 'pointer',
+                  color: '#6b7280',
+                  padding: '4px',
+                  borderRadius: '4px',
+                  transition: 'all 0.2s',
+                  lineHeight: 1,
+                  width: '32px',
+                  height: '32px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center'
+                }}
+                onMouseEnter={(e) => {
+                  e.target.style.backgroundColor = '#f3f4f6';
+                  e.target.style.color = '#374151';
+                }}
+                onMouseLeave={(e) => {
+                  e.target.style.backgroundColor = 'transparent';
+                  e.target.style.color = '#6b7280';
+                }}
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="dialog-content" style={{
+              padding: '24px',
+              flex: 1,
+              overflowY: 'auto',
+              background: 'white'
+            }}>
+              <textarea
+                value={editingObservations ? (listObservations[currentList] || "") : (listObservations[currentList] || "")}
+                onChange={(e) => !editingObservations ? null : setListObservations(prev => ({ ...prev, [currentList]: e.target.value }))}
+                placeholder="Añade observaciones sobre esta lista..."
+                rows="6"
+                disabled={!editingObservations}
+                className="elegant-textarea"
+                style={{
+                  color: 'black',
+                  width: '100%',
+                  padding: '12px',
+                  border: '1px solid #d1d5db',
+                  borderRadius: '8px',
+                  fontSize: '16px',
+                  resize: 'vertical',
+                  minHeight: '120px',
+                  backgroundColor: editingObservations ? 'white' : '#f9fafb'
+                }}
+              />
+            </div>
+
+            <div className="dialog-buttons" style={{
+              display: 'flex',
+              gap: '12px',
+              justifyContent: 'flex-end',
+              padding: '0 24px 24px',
+              flexWrap: 'wrap',
+              background: 'white'
+            }}>
+              {!editingObservations ? (
+                <>
+                  <button
+                    onClick={() => setObservationsDialogOpen(false)}
+                    className="cancel-btn"
+                    style={{
+                      backgroundColor: '#f3f4f6',
+                      color: '#374151',
+                      border: '1px solid #d1d5db',
+                      padding: '10px 20px',
+                      borderRadius: '8px',
+                      cursor: 'pointer',
+                      fontWeight: '500',
+                      transition: 'all 0.2s',
+                      minWidth: '80px'
+                    }}
+                    onMouseEnter={(e) => {
+                      e.target.style.backgroundColor = '#e5e7eb';
+                      e.target.style.borderColor = '#9ca3af';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.target.style.backgroundColor = '#f3f4f6';
+                      e.target.style.borderColor = '#d1d5db';
+                    }}
+                  >
+                    Cerrar
+                  </button>
+                  <button
+                    onClick={() => setEditingObservations(true)}
+                    className="blue-button"
+                    style={{
+                      backgroundColor: '#3b82f6',
+                      color: 'white',
+                      border: 'none',
+                      padding: '10px 20px',
+                      borderRadius: '8px',
+                      cursor: 'pointer',
+                      fontWeight: '500',
+                      transition: 'all 0.2s',
+                      minWidth: '80px'
+                    }}
+                    onMouseEnter={(e) => {
+                      e.target.style.backgroundColor = '#2563eb';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.target.style.backgroundColor = '#3b82f6';
+                    }}
+                  >
+                    Editar
+                  </button>
+                  {listObservations[currentList] && (
+                    <button
+                      onClick={() => {
+                        saveListObservations(currentList, "");
+                        setEditingObservations(false);
+                      }}
+                      className="cancel-btn"
+                      style={{
+                        backgroundColor: '#f3f4f6',
+                        color: '#374151',
+                        border: '1px solid #d1d5db',
+                        padding: '10px 20px',
+                        borderRadius: '8px',
+                        cursor: 'pointer',
+                        fontWeight: '500',
+                        transition: 'all 0.2s',
+                        minWidth: '80px'
+                      }}
+                      onMouseEnter={(e) => {
+                        e.target.style.backgroundColor = '#e5e7eb';
+                        e.target.style.borderColor = '#9ca3af';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.target.style.backgroundColor = '#f3f4f6';
+                        e.target.style.borderColor = '#d1d5db';
+                      }}
+                    >
+                      Limpiar
+                    </button>
+                  )}
+                </>
+              ) : (
+                <>
+                  <button
+                    onClick={() => {
+                      setObservationsDialogOpen(false);
+                      setEditingObservations(false);
+                    }}
+                    className="cancel-btn"
+                    style={{
+                      backgroundColor: '#f3f4f6',
+                      color: '#374151',
+                      border: '1px solid #d1d5db',
+                      padding: '10px 20px',
+                      borderRadius: '8px',
+                      cursor: 'pointer',
+                      fontWeight: '500',
+                      transition: 'all 0.2s',
+                      minWidth: '80px'
+                    }}
+                    onMouseEnter={(e) => {
+                      e.target.style.backgroundColor = '#e5e7eb';
+                      e.target.style.borderColor = '#9ca3af';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.target.style.backgroundColor = '#f3f4f6';
+                      e.target.style.borderColor = '#d1d5db';
+                    }}
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    onClick={() => {
+                      saveListObservations(currentList, listObservations[currentList] || "");
+                      setEditingObservations(false);
+                    }}
+                    className="blue-button"
+                    style={{
+                      backgroundColor: '#3b82f6',
+                      color: 'white',
+                      border: 'none',
+                      padding: '10px 20px',
+                      borderRadius: '8px',
+                      cursor: 'pointer',
+                      fontWeight: '500',
+                      transition: 'all 0.2s',
+                      minWidth: '80px'
+                    }}
+                    onMouseEnter={(e) => {
+                      e.target.style.backgroundColor = '#2563eb';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.target.style.backgroundColor = '#3b82f6';
+                    }}
+                  >
+                    Guardar
+                  </button>
+                  <button
+                    onClick={() => {
+                      saveListObservations(currentList, "");
+                      setListObservations(prev => ({ ...prev, [currentList]: "" }));
+                      setEditingObservations(false);
+                    }}
+                    className="cancel-btn"
+                    style={{
+                      backgroundColor: '#f3f4f6',
+                      color: '#374151',
+                      border: '1px solid #d1d5db',
+                      padding: '10px 20px',
+                      borderRadius: '8px',
+                      cursor: 'pointer',
+                      fontWeight: '500',
+                      transition: 'all 0.2s',
+                      minWidth: '80px'
+                    }}
+                    onMouseEnter={(e) => {
+                      e.target.style.backgroundColor = '#e5e7eb';
+                      e.target.style.borderColor = '#9ca3af';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.target.style.backgroundColor = '#f3f4f6';
+                      e.target.style.borderColor = '#d1d5db';
+                    }}
+                  >
+                    Limpiar
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de División de Gastos */}
+      {splitDialogOpen && (
+        <div className="modal-overlay" style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0, 0, 0, 0.6)',
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          zIndex: 9999
+        }}>
+          <div className="dialog-modal" style={{
+            backgroundColor: 'white',
+            borderRadius: '12px',
+            boxShadow: '0 10px 30px rgba(0, 0, 0, 0.3)',
+            width: '90%',
+            maxWidth: '500px',
+            maxHeight: '90vh',
+            display: 'flex',
+            flexDirection: 'column',
+            overflow: 'hidden'
+          }}>
+            <div className="dialog-header" style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              padding: '20px 24px 0',
+              borderBottom: '1px solid #e5e7eb',
+              marginBottom: 0,
+              background: 'white'
+            }}>
+              <h3 style={{
+                margin: 0,
+                fontSize: '1.25rem',
+                fontWeight: '600',
+                color: '#1f2937'
+              }}>
+                División de Gastos
+              </h3>
+              <button
+                onClick={() => setSplitDialogOpen(false)}
+                className="close-btn"
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  fontSize: '1.5rem',
+                  cursor: 'pointer',
+                  color: '#6b7280',
+                  padding: '4px',
+                  borderRadius: '4px',
+                  transition: 'all 0.2s',
+                  lineHeight: 1,
+                  width: '32px',
+                  height: '32px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center'
+                }}
+                onMouseEnter={(e) => {
+                  e.target.style.backgroundColor = '#f3f4f6';
+                  e.target.style.color = '#374151';
+                }}
+                onMouseLeave={(e) => {
+                  e.target.style.backgroundColor = 'transparent';
+                  e.target.style.color = '#6b7280';
+                }}
+              >
+                ×
+              </button>
+            </div>
+
+            <SplitDialogContent />
+
+            <div className="dialog-buttons" style={{
+              display: 'flex',
+              gap: '12px',
+              justifyContent: 'flex-end',
+              padding: '0 24px 24px',
+              flexWrap: 'wrap',
+              background: 'white'
+            }}>
+              <button
+                onClick={() => setSplitDialogOpen(false)}
+                className="cancel-btn"
+                style={{
+                  backgroundColor: '#f3f4f6',
+                  color: '#374151',
+                  border: '1px solid #d1d5db',
+                  padding: '10px 20px',
+                  borderRadius: '8px',
+                  cursor: 'pointer',
+                  fontWeight: '500',
+                  transition: 'all 0.2s',
+                  minWidth: '80px'
+                }}
+                onMouseEnter={(e) => {
+                  e.target.style.backgroundColor = '#e5e7eb';
+                  e.target.style.borderColor = '#9ca3af';
+                }}
+                onMouseLeave={(e) => {
+                  e.target.style.backgroundColor = '#f3f4f6';
+                  e.target.style.borderColor = '#d1d5db';
+                }}
+              >
+                Cerrar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <style jsx>{`
         :root {
           --primary-blue: #1e88e5;
@@ -2962,9 +4597,9 @@ export function ShoppingList() {
           cursor: pointer;
           padding: 4px;
           border-radius: 4px;
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
+          display: flex;
+          align-items: center;
+          justify-content: center;
           transition: all 0.2s;
         }
         
