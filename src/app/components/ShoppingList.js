@@ -42,6 +42,9 @@ export function ShoppingList() {
   const itemsCache = useRef({});
   const listsCache = useRef({ userLists: [], sharedLists: [] });
 
+  const [editingList, setEditingList] = useState(null);
+  const [editedListName, setEditedListName] = useState("");
+
   // Categorías mejoradas con íconos y colores para organización visual
   const CATEGORIES = {
     "FRUITS_VEGETABLES": {
@@ -600,6 +603,79 @@ export function ShoppingList() {
     } catch (err) {
       setError(`Error al eliminar: ${err.message}`);
       showToast(`Error al eliminar: ${err.message}`, 'error');
+    }
+  };
+
+  const updateListName = async (listId, newName) => {
+    if (!auth.currentUser?.uid || !newName.trim()) {
+      throw new Error("Nombre de lista inválido");
+    }
+
+    try {
+      // Verificar que el usuario es el propietario
+      const listDoc = await getDoc(doc(db, "lists", listId));
+      if (listDoc.data()?.userId !== auth.currentUser.uid) {
+        throw new Error("Solo el propietario puede editar la lista");
+      }
+
+      // Actualización optimista
+      setLists(prev => prev.map(list =>
+        list.id === listId
+          ? { ...list, name: newName.trim(), isOptimistic: true }
+          : list
+      ));
+
+      // Actualizar en Firebase
+      await updateDoc(doc(db, "lists", listId), {
+        name: newName.trim(),
+        updatedAt: new Date()
+      });
+
+      // Actualizar el estado local
+      setLists(prev => prev.map(list =>
+        list.id === listId
+          ? { ...list, name: newName.trim(), isOptimistic: false }
+          : list
+      ));
+
+      showToast("Nombre de lista actualizado", 'success');
+      return true;
+    } catch (err) {
+      console.error("Error actualizando lista:", err);
+      // Revertir cambios en caso de error
+      setLists(prev => prev.map(list =>
+        list.id === listId
+          ? { ...list, name: listDoc.data()?.name || list.name, isOptimistic: false }
+          : list
+      ));
+      throw err;
+    }
+  };
+
+  // Función para iniciar la edición
+  const startEditing = (list) => {
+    if (list.userId === auth.currentUser?.uid) {
+      setEditingList(list.id);
+      setEditedListName(list.name);
+    }
+  };
+
+  // Función para cancelar la edición
+  const cancelEditing = () => {
+    setEditingList(null);
+    setEditedListName("");
+  };
+
+  // Función para guardar la edición
+  const saveListName = async () => {
+    if (!editingList || !editedListName.trim()) return;
+
+    try {
+      await updateListName(editingList, editedListName);
+      setEditingList(null);
+      setEditedListName("");
+    } catch (err) {
+      showToast(`Error al actualizar: ${err.message}`, 'error');
     }
   };
 
@@ -2466,6 +2542,48 @@ export function ShoppingList() {
                   gap: '8px',
                   flexWrap: 'wrap'
                 }}>
+                  {/* BOTÓN DE EDITAR - SOLO PARA LISTAS PROPIAS */}
+                  {currentList && isCurrentListOwned() && (
+                    <button
+                      onClick={() => {
+                        const currentListData = allLists.find(list => list.id === currentList);
+                        if (currentListData) startEditing(currentListData);
+                      }}
+                      disabled={loading}
+                      className="elegant-action-btn"
+                      title="Editar nombre de la lista"
+                      style={{
+                        padding: '8px 12px',
+                        border: '1px solid #10B981',
+                        borderRadius: '8px',
+                        backgroundColor: 'white',
+                        color: '#10B981',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                        fontSize: '14px',
+                        fontWeight: '500',
+                        transition: 'all 0.2s',
+                        minWidth: 'fit-content'
+                      }}
+                      onMouseEnter={(e) => {
+                        e.target.style.backgroundColor = '#ECFDF5';
+                        e.target.style.borderColor = '#059669';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.target.style.backgroundColor = 'white';
+                        e.target.style.borderColor = '#10B981';
+                      }}
+                    >
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M11 4H4C3.46957 4 2.96086 4.21071 2.58579 4.58579C2.21071 4.96086 2 5.46957 2 6V20C2 20.5304 2.21071 21.0391 2.58579 21.4142C2.96086 21.7893 3.46957 22 4 22H18C18.5304 22 19.0391 21.7893 19.4142 21.4142C19.7893 21.0391 20 20.5304 20 20V13" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                        <path d="M18.5 2.5C18.8978 2.10217 19.4374 1.87868 20 1.87868C20.5626 1.87868 21.1022 2.10217 21.5 2.5C21.8978 2.89782 22.1213 3.43739 22.1213 4C22.1213 4.56261 21.8978 5.10217 21.5 5.5L12 15L8 16L9 12L18.5 2.5Z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                      </svg>
+                      Editar
+                    </button>
+                  )}
+
                   <button
                     onClick={openShareDialog}
                     disabled={!currentList || loading || isCurrentListShared()}
@@ -2562,6 +2680,183 @@ export function ShoppingList() {
                 </div>
               </div>
 
+              {/* MODAL DE EDICIÓN - Aparece cuando se hace clic en Editar */}
+              {editingList && (
+                <div className="modal-overlay" style={{
+                  position: 'fixed',
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  backgroundColor: 'rgba(0, 0, 0, 0.6)',
+                  display: 'flex',
+                  justifyContent: 'center',
+                  alignItems: 'center',
+                  zIndex: 9999
+                }}>
+                  <div className="dialog-modal" style={{
+                    backgroundColor: 'white',
+                    borderRadius: '12px',
+                    boxShadow: '0 10px 30px rgba(0, 0, 0, 0.3)',
+                    width: '90%',
+                    maxWidth: '400px',
+                    maxHeight: '90vh',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    overflow: 'hidden'
+                  }}>
+                    <div className="dialog-header" style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      padding: '20px 24px 0',
+                      borderBottom: '1px solid #e5e7eb',
+                      marginBottom: 0,
+                      background: 'white'
+                    }}>
+                      <h3 style={{
+                        margin: 0,
+                        fontSize: '1.25rem',
+                        fontWeight: '600',
+                        color: '#1f2937'
+                      }}>
+                        Editar nombre de lista
+                      </h3>
+                      <button
+                        onClick={cancelEditing}
+                        className="close-btn"
+                        style={{
+                          background: 'none',
+                          border: 'none',
+                          fontSize: '1.5rem',
+                          cursor: 'pointer',
+                          color: '#6b7280',
+                          padding: '4px',
+                          borderRadius: '4px',
+                          transition: 'all 0.2s',
+                          lineHeight: 1,
+                          width: '32px',
+                          height: '32px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center'
+                        }}
+                        onMouseEnter={(e) => {
+                          e.target.style.backgroundColor = '#f3f4f6';
+                          e.target.style.color = '#374151';
+                        }}
+                        onMouseLeave={(e) => {
+                          e.target.style.backgroundColor = 'transparent';
+                          e.target.style.color = '#6b7280';
+                        }}
+                      >
+                        ×
+                      </button>
+                    </div>
+
+                    <div className="dialog-content" style={{
+                      padding: '24px',
+                      flex: 1,
+                      overflowY: 'auto',
+                      background: 'white'
+                    }}>
+                      <p style={{
+                        color: "#1f2937",
+                        margin: '0 0 16px 0',
+                        fontSize: '16px',
+                        lineHeight: '1.5'
+                      }}>
+                        Nuevo nombre para la lista:
+                      </p>
+                      <input
+                        type="text"
+                        value={editedListName}
+                        onChange={(e) => setEditedListName(e.target.value)}
+                        onKeyPress={(e) => {
+                          if (e.key === 'Enter') saveListName();
+                        }}
+                        placeholder="Nombre de la lista..."
+                        className="elegant-input"
+                        style={{
+                          width: '100%',
+                          padding: '12px',
+                          border: '1px solid #d1d5db',
+                          borderRadius: '8px',
+                          fontSize: '16px',
+                          color: '#1f2937',
+                          outline: 'none'
+                        }}
+                        autoFocus
+                      />
+                    </div>
+
+                    <div className="dialog-buttons" style={{
+                      display: 'flex',
+                      gap: '12px',
+                      justifyContent: 'flex-end',
+                      padding: '0 24px 24px',
+                      flexWrap: 'wrap',
+                      background: 'white'
+                    }}>
+                      <button
+                        onClick={cancelEditing}
+                        className="cancel-btn"
+                        style={{
+                          backgroundColor: '#f3f4f6',
+                          color: '#374151',
+                          border: '1px solid #d1d5db',
+                          padding: '10px 20px',
+                          borderRadius: '8px',
+                          cursor: 'pointer',
+                          fontWeight: '500',
+                          transition: 'all 0.2s',
+                          minWidth: '80px'
+                        }}
+                        onMouseEnter={(e) => {
+                          e.target.style.backgroundColor = '#e5e7eb';
+                          e.target.style.borderColor = '#9ca3af';
+                        }}
+                        onMouseLeave={(e) => {
+                          e.target.style.backgroundColor = '#f3f4f6';
+                          e.target.style.borderColor = '#d1d5db';
+                        }}
+                      >
+                        Cancelar
+                      </button>
+                      <button
+                        onClick={saveListName}
+                        disabled={!editedListName.trim()}
+                        className="blue-button"
+                        style={{
+                          backgroundColor: !editedListName.trim() ? '#9ca3af' : '#3b82f6',
+                          color: 'white',
+                          border: 'none',
+                          padding: '10px 20px',
+                          borderRadius: '8px',
+                          cursor: !editedListName.trim() ? 'not-allowed' : 'pointer',
+                          fontWeight: '500',
+                          transition: 'all 0.2s',
+                          minWidth: '80px'
+                        }}
+                        onMouseEnter={(e) => {
+                          if (editedListName.trim()) {
+                            e.target.style.backgroundColor = '#2563eb';
+                          }
+                        }}
+                        onMouseLeave={(e) => {
+                          if (editedListName.trim()) {
+                            e.target.style.backgroundColor = '#3b82f6';
+                          }
+                        }}
+                      >
+                        Guardar
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* SELECT ORIGINAL - SIN MODIFICAR */}
               <select
                 value={currentList}
                 onChange={(e) => setCurrentList(e.target.value)}
