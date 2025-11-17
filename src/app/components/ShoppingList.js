@@ -7,6 +7,26 @@ import { signOut, onAuthStateChanged } from "firebase/auth";
 import { ToastContainer, toast } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
 import { FileText, Users, ShoppingCart } from "lucide-react";
+import { Bar } from 'react-chartjs-2';
+import {
+  Chart as ChartJS,
+  CategoryScale,
+  LinearScale,
+  BarElement,
+  Title,
+  Tooltip,
+  Legend,
+} from 'chart.js';
+
+// Registrar componentes de Chart.js (sin ArcElement)
+ChartJS.register(
+  CategoryScale,
+  LinearScale,
+  BarElement,
+  Title,
+  Tooltip,
+  Legend
+);
 
 
 export function ShoppingList() {
@@ -50,6 +70,7 @@ export function ShoppingList() {
   const [priceDialogOpen, setPriceDialogOpen] = useState(false);
   const [currentPriceItem, setCurrentPriceItem] = useState(null);
   const [priceInput, setPriceInput] = useState("");
+  const [chartsDialogOpen, setChartsDialogOpen] = useState(false);
 
   // Categorías mejoradas con íconos y colores para organización visual
   const CATEGORIES = {
@@ -414,12 +435,6 @@ export function ShoppingList() {
       const newCompletedStatus = !currentStatus;
       const userEmail = auth.currentUser?.email || "";
 
-      // Si la lista está finalizada, no permitir cambios
-      if (isListFinalized[currentList]) {
-        showToast("No se puede modificar una lista finalizada", 'warning');
-        return;
-      }
-
       let priceToSave = 0;
 
       // Si se marca como completado, abrir modal para precio
@@ -575,6 +590,7 @@ export function ShoppingList() {
         throw new Error("Producto no encontrado");
       }
 
+
       // Actualización optimista - eliminar inmediatamente del estado local
       setItems(prev => prev.filter(item => item.id !== id));
       setConfirmDelete(null);
@@ -711,6 +727,89 @@ export function ShoppingList() {
       throw err;
     }
   };
+
+  // Función para calcular datos de las gráficas
+  const getChartsData = () => {
+    if (!currentList) return null;
+
+    const listItems = items.filter(item => item.listId === currentList && item.completed);
+
+    if (listItems.length === 0) return null;
+
+    // SOLO Gráfica de gastos por persona
+    const expensesByPerson = {};
+    listItems.forEach(item => {
+      const person = item.purchasedBy || 'Desconocido';
+      const price = itemPrices[item.id] || 0;
+      expensesByPerson[person] = (expensesByPerson[person] || 0) + price;
+    });
+
+    const personChartData = {
+      labels: Object.keys(expensesByPerson).map(email => email.split('@')[0]),
+      datasets: [
+        {
+          label: 'Gastos por Persona (€)',
+          data: Object.values(expensesByPerson),
+          backgroundColor: [
+            '#3B82F6',
+            '#10B981',
+            '#F59E0B',
+            '#EF4444',
+            '#8B5CF6',
+            '#06B6D4',
+            '#F97316',
+          ],
+          borderColor: [
+            '#2563EB',
+            '#059669',
+            '#D97706',
+            '#DC2626',
+            '#7C3AED',
+            '#0891B2',
+            '#EA580C',
+          ],
+          borderWidth: 2,
+        },
+      ],
+    };
+
+    return {
+      personChartData,
+      totalSpent: listItems.reduce((sum, item) => sum + (itemPrices[item.id] || 0), 0),
+      itemCount: listItems.length,
+    };
+  };
+
+  // Función para abrir el diálogo de gráficas
+  const openChartsDialog = () => {
+    if (!currentList) {
+      showToast('Selecciona una lista primero', 'warning');
+      return;
+    }
+
+    const completedItems = items.filter(item => item.listId === currentList && item.completed);
+    if (completedItems.length === 0) {
+      showToast('No hay productos comprados para mostrar gráficas', 'warning');
+      return;
+    }
+
+    setChartsDialogOpen(true);
+  };
+
+  // Opciones para las gráficas
+  const chartOptions = {
+    responsive: true,
+    plugins: {
+      legend: {
+        position: 'top',
+      },
+      title: {
+        display: true,
+        text: 'Análisis de Gastos',
+      },
+    },
+  };
+
 
   // Función para iniciar la edición
   const startEditing = (list) => {
@@ -1274,12 +1373,35 @@ export function ShoppingList() {
     const currentObservations = listObservations[currentList] || "";
     const currentPurchaseInfo = purchaseInfo[currentList];
     const isSharedList = isCurrentListShared() || isCurrentListSharedByMe();
+    const completedItems = items.filter(item => item.listId === currentList && item.completed);
 
     return (
       <div className="list-info-section" style={{ marginBottom: "3%" }}>
         <div className="list-info-header">
           <h4 style={{ color: "black" }}>Información de la Lista</h4>
           <div className="list-info-actions">
+            {/* Botón de Gráficas - solo si hay productos comprados */}
+            {completedItems.length > 0 && (
+              <button
+                onClick={openChartsDialog}
+                className="action-btn"
+                title="Ver Gráficas de Gastos"
+                style={{
+                  padding: "8px",
+                  borderRadius: "8px",
+                  border: "1px solid #e2e8f0",
+                  background: "white",
+                  color: "black",
+                  cursor: "pointer"
+                }}
+              >
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M3 3V21H21" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                  <path d="M7 16L9.5 11.5L12 14L16 8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </button>
+            )}
+
             <button
               onClick={() => setObservationsDialogOpen(true)}
               className="action-btn"
@@ -1293,10 +1415,9 @@ export function ShoppingList() {
                 cursor: "pointer"
               }}
             >
-              <FileText size={24} /> {/* más grande */}
+              <FileText size={24} />
             </button>
 
-            {/* Botón de Dividir Gastos - solo visible en listas compartidas */}
             {isSharedList && (
               <button
                 onClick={() => setSplitDialogOpen(true)}
@@ -1377,7 +1498,6 @@ export function ShoppingList() {
   const pendingItems = sortedItems.filter(item => !item.completed);
   const completedItems = sortedItems.filter(item => item.completed);
   const groupedPendingItems = groupItemsByCategory(pendingItems);
-
 
 
   // Componente elegante para renderizar items individuales 
@@ -4458,7 +4578,8 @@ export function ShoppingList() {
               </div>
 
               <p style={{ color: 'black', marginBottom: '16px', fontSize: '14px' }}>
-                Al finalizar la compra, no se podrán modificar los productos ni sus precios.
+                Al finalizar la compra, se guardará el precio total actual.
+                <strong> Podrás seguir añadiendo y modificando productos</strong> después de finalizar.
               </p>
             </div>
 
@@ -4901,6 +5022,172 @@ export function ShoppingList() {
                 onMouseLeave={(e) => {
                   e.target.style.backgroundColor = '#f3f4f6';
                   e.target.style.borderColor = '#d1d5db';
+                }}
+              >
+                Cerrar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {chartsDialogOpen && (
+        <div className="modal-overlay" style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0, 0, 0, 0.6)',
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          zIndex: 9999
+        }}>
+          <div className="dialog-modal" style={{
+            backgroundColor: 'white',
+            borderRadius: '12px',
+            boxShadow: '0 10px 30px rgba(0, 0, 0, 0.3)',
+            width: '90%',
+            maxWidth: '600px', // Reducido porque solo hay una gráfica
+            maxHeight: '90vh',
+            display: 'flex',
+            flexDirection: 'column',
+            overflow: 'hidden'
+          }}>
+            <div className="dialog-header" style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              padding: '20px 24px 0',
+              borderBottom: '1px solid #e5e7eb',
+              marginBottom: 0,
+              background: 'white'
+            }}>
+              <h3 style={{
+                margin: 0,
+                fontSize: '1.25rem',
+                fontWeight: '600',
+                color: '#1f2937'
+              }}>
+                Gráficas de Gastos - {getCurrentListName()}
+              </h3>
+              <button
+                onClick={() => setChartsDialogOpen(false)}
+                className="close-btn"
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  fontSize: '1.5rem',
+                  cursor: 'pointer',
+                  color: '#6b7280',
+                  padding: '4px',
+                  borderRadius: '4px',
+                  transition: 'all 0.2s',
+                  lineHeight: 1,
+                  width: '32px',
+                  height: '32px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center'
+                }}
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="dialog-content" style={{
+              padding: '24px',
+              flex: 1,
+              overflowY: 'auto',
+              background: 'white'
+            }}>
+              {(() => {
+                const chartsData = getChartsData();
+                if (!chartsData) {
+                  return (
+                    <div style={{ textAlign: 'center', padding: '40px' }}>
+                      <p style={{ color: '#6b7280' }}>No hay datos para mostrar</p>
+                    </div>
+                  );
+                }
+
+                const { personChartData, totalSpent, itemCount } = chartsData;
+
+                return (
+                  <div>
+                    {/* Resumen general */}
+                    <div style={{
+                      display: 'grid',
+                      gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
+                      gap: '12px',
+                      marginBottom: '24px'
+                    }}>
+                      <div style={{
+                        backgroundColor: '#f0f9ff',
+                        padding: '16px',
+                        borderRadius: '8px',
+                        border: '1px solid #bae6fd',
+                        textAlign: 'center'
+                      }}>
+                        <div style={{ fontSize: '14px', color: '#0369a1', marginBottom: '4px' }}>
+                          Total Gastado
+                        </div>
+                        <div style={{ fontSize: '20px', fontWeight: '700', color: '#0369a1' }}>
+                          {totalSpent.toFixed(2)} €
+                        </div>
+                      </div>
+                      <div style={{
+                        backgroundColor: '#f0fdf4',
+                        padding: '16px',
+                        borderRadius: '8px',
+                        border: '1px solid #bbf7d0',
+                        textAlign: 'center'
+                      }}>
+                        <div style={{ fontSize: '14px', color: '#166534', marginBottom: '4px' }}>
+                          Productos
+                        </div>
+                        <div style={{ fontSize: '20px', fontWeight: '700', color: '#166534' }}>
+                          {itemCount}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* SOLO Gráfica de gastos por persona */}
+                    <div style={{ marginBottom: '32px' }}>
+                      <h4 style={{ color: '#1f2937', marginBottom: '16px', textAlign: 'center' }}>
+                        Gastos por Persona
+                      </h4>
+                      <div style={{ height: '300px' }}>
+                        <Bar data={personChartData} options={chartOptions} />
+                      </div>
+                    </div>
+
+                  </div>
+                );
+              })()}
+            </div>
+
+            <div className="dialog-buttons" style={{
+              display: 'flex',
+              gap: '12px',
+              justifyContent: 'flex-end',
+              padding: '0 24px 24px',
+              flexWrap: 'wrap',
+              background: 'white'
+            }}>
+              <button
+                onClick={() => setChartsDialogOpen(false)}
+                className="cancel-btn"
+                style={{
+                  backgroundColor: '#f3f4f6',
+                  color: '#374151',
+                  border: '1px solid #d1d5db',
+                  padding: '10px 20px',
+                  borderRadius: '8px',
+                  cursor: 'pointer',
+                  fontWeight: '500',
+                  minWidth: '80px'
                 }}
               >
                 Cerrar
