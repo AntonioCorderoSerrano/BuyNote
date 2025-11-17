@@ -44,6 +44,12 @@ export function ShoppingList() {
 
   const [editingList, setEditingList] = useState(null);
   const [editedListName, setEditedListName] = useState("");
+  const [itemPrices, setItemPrices] = useState({});
+  const [isListFinalized, setIsListFinalized] = useState({});
+  // Estados para el modal de precio
+  const [priceDialogOpen, setPriceDialogOpen] = useState(false);
+  const [currentPriceItem, setCurrentPriceItem] = useState(null);
+  const [priceInput, setPriceInput] = useState("");
 
   // Categorías mejoradas con íconos y colores para organización visual
   const CATEGORIES = {
@@ -222,7 +228,6 @@ export function ShoppingList() {
     console.log("Lista actual:", currentList);
   }, [currentList]);
 
-  // También puedes agregar una verificación en el efecto de carga de items
   useEffect(() => {
     if (!currentList) {
       setItems([]);
@@ -278,6 +283,11 @@ export function ShoppingList() {
     );
 
     return unsubscribe;
+  }, [currentList]);
+
+  // Efecto para limpiar precios al cambiar de lista
+  useEffect(() => {
+    setItemPrices({});
   }, [currentList]);
 
   // Crear una nueva lista de compras
@@ -404,7 +414,39 @@ export function ShoppingList() {
       const newCompletedStatus = !currentStatus;
       const userEmail = auth.currentUser?.email || "";
 
-      // Actualización optimista MEJORADA
+      // Si la lista está finalizada, no permitir cambios
+      if (isListFinalized[currentList]) {
+        showToast("No se puede modificar una lista finalizada", 'warning');
+        return;
+      }
+
+      let priceToSave = 0;
+
+      // Si se marca como completado, abrir modal para precio
+      if (newCompletedStatus && !currentStatus) {
+        try {
+          const price = await openPriceDialog(currentItem);
+          if (price === null) {
+            // Si cancela, no marcar como completado
+            return;
+          } else {
+            // Si introduce un precio, guardarlo
+            const parsedPrice = parseFloat(price) || 0;
+            priceToSave = parsedPrice;
+
+            // Actualizar estado local inmediatamente
+            setItemPrices(prev => ({
+              ...prev,
+              [itemId]: parsedPrice
+            }));
+          }
+        } catch (error) {
+          console.error("Error en el diálogo de precio:", error);
+          return;
+        }
+      }
+
+      // Actualización optimista
       setItems(prev => prev.map(item =>
         item.id === itemId
           ? {
@@ -412,7 +454,8 @@ export function ShoppingList() {
             completed: newCompletedStatus,
             purchasedBy: newCompletedStatus ? userEmail : "",
             purchasedAt: newCompletedStatus ? new Date() : null,
-            category: newCompletedStatus ? "COMPRADO" : detectCategory(currentItem.text)
+            category: newCompletedStatus ? "COMPRADO" : detectCategory(currentItem.text),
+            price: newCompletedStatus ? priceToSave : null // Añadir precio al item
           }
           : item
       ));
@@ -424,21 +467,26 @@ export function ShoppingList() {
         updatedAt: new Date()
       };
 
-      // Solo añadir información de compra si se marca como completado
       if (newCompletedStatus) {
         updates.purchasedBy = userEmail;
         updates.purchasedAt = new Date();
+        updates.price = priceToSave; // Guardar precio en Firebase
       } else {
-        // Si se desmarca, limpiar la información de compra
         updates.purchasedBy = "";
         updates.purchasedAt = null;
+        updates.price = null;
+
+        // Eliminar precio local
+        setItemPrices(prev => {
+          const newPrices = { ...prev };
+          delete newPrices[itemId];
+          return newPrices;
+        });
       }
 
       console.log("Actualizando item en Firebase:", itemId, updates);
 
       const itemRef = doc(db, "items", itemId);
-
-      // Verificar que el documento existe antes de actualizar
       const docSnap = await getDoc(itemRef);
       if (!docSnap.exists()) {
         throw new Error("El producto no existe en la base de datos");
@@ -458,6 +506,18 @@ export function ShoppingList() {
 
       showToast("Error al actualizar el producto: " + err.message, 'error');
     }
+  };
+
+  // Función para abrir diálogo de precio
+  const openPriceDialog = (item) => {
+    return new Promise((resolve) => {
+      setCurrentPriceItem(item);
+      setPriceInput("");
+      setPriceDialogOpen(true);
+
+      // Guardamos la función resolve para usarla cuando se cierre el modal
+      window.priceDialogResolve = resolve;
+    });
   };
 
   // Cargar observaciones de la lista desde Firebase
@@ -870,40 +930,48 @@ export function ShoppingList() {
   };
 
   // Función para finalizar compra - guardar precio total
-  const finalizePurchase = async (listId, totalPrice) => {
+  // Función para finalizar compra - calcular total automáticamente
+  const finalizePurchase = async (listId, manualPrice = null) => {
     try {
       // Guardar el currentList actual para asegurarnos de no perderlo
       const currentListBeforeUpdate = currentList;
 
-      if (totalPrice !== null) {
-        const purchaseInfoData = {
-          totalPrice: parseFloat(totalPrice),
-          finalizedAt: new Date(),
-          finalizedBy: auth.currentUser?.email || "",
-        };
-
-        await updateDoc(doc(db, "lists", listId), {
-          purchaseInfo: purchaseInfoData
-        });
-
-        setPurchaseInfo(prev => ({
-          ...prev,
-          [listId]: purchaseInfoData
-        }));
-
-        showToast(`Precio guardado: ${totalPrice} €`, 'success');
+      // Calcular total automáticamente desde los precios individuales
+      let totalPrice = 0;
+      if (manualPrice === null) {
+        const listItems = items.filter(item => item.listId === listId && item.completed);
+        totalPrice = listItems.reduce((sum, item) => {
+          return sum + (itemPrices[item.id] || 0);
+        }, 0);
       } else {
-        await updateDoc(doc(db, "lists", listId), {
-          purchaseInfo: null
-        });
-
-        setPurchaseInfo(prev => ({
-          ...prev,
-          [listId]: null
-        }));
-
-        showToast("Precio eliminado", 'info');
+        totalPrice = parseFloat(manualPrice);
       }
+
+      const purchaseInfoData = {
+        totalPrice: totalPrice,
+        finalizedAt: new Date(),
+        finalizedBy: auth.currentUser?.email || "",
+        itemCount: items.filter(item => item.listId === listId && item.completed).length,
+        isFinalized: true
+      };
+
+      // Marcar lista como finalizada
+      setIsListFinalized(prev => ({
+        ...prev,
+        [listId]: true
+      }));
+
+      await updateDoc(doc(db, "lists", listId), {
+        purchaseInfo: purchaseInfoData,
+        isFinalized: true
+      });
+
+      setPurchaseInfo(prev => ({
+        ...prev,
+        [listId]: purchaseInfoData
+      }));
+
+      showToast(`Compra finalizada! Total: ${totalPrice.toFixed(2)} €`, 'success');
 
       // Asegurarse de que currentList no cambió durante la operación
       if (currentList !== currentListBeforeUpdate) {
@@ -913,7 +981,7 @@ export function ShoppingList() {
 
     } catch (error) {
       console.error("Error finalizando compra:", error);
-      showToast("Error al guardar precio: " + error.message, 'error');
+      showToast("Error al finalizar compra: " + error.message, 'error');
     }
   };
 
@@ -994,6 +1062,7 @@ export function ShoppingList() {
   useEffect(() => {
     if (!currentList) {
       setItems([]);
+      setItemPrices({}); // Limpiar precios
       return;
     }
 
@@ -1007,7 +1076,14 @@ export function ShoppingList() {
         const updatedItems = snapshot.docs.map(doc => {
           const data = doc.data();
 
-          // Asegurar que todos los campos necesarios existen
+          // Cargar precios individuales desde Firebase
+          if (data.price !== undefined && data.price !== null) {
+            setItemPrices(prev => ({
+              ...prev,
+              [doc.id]: data.price
+            }));
+          }
+
           const categoryInfo = getCategoryInfo(data.category || "OTHER");
 
           return {
@@ -1023,7 +1099,8 @@ export function ShoppingList() {
             createdAt: data.createdAt || new Date(),
             categoryColor: categoryInfo.color,
             categoryIcon: categoryInfo.icon,
-            isOptimistic: false
+            isOptimistic: false,
+            price: data.price || null // Añadir precio al item
           };
         });
 
@@ -1067,6 +1144,42 @@ export function ShoppingList() {
     }
   };
 
+  // Función para actualizar precio de un item específico
+  const updateItemPrice = async (itemId, price) => {
+    if (!itemId || !auth.currentUser) return;
+
+    try {
+      const parsedPrice = parseFloat(price) || 0;
+
+      // Actualizar estado local inmediatamente
+      setItemPrices(prev => ({
+        ...prev,
+        [itemId]: parsedPrice
+      }));
+
+      // Actualizar en Firebase si no es un item temporal
+      if (!itemId.startsWith('temp-')) {
+        const itemRef = doc(db, "items", itemId);
+        await updateDoc(itemRef, {
+          price: parsedPrice,
+          updatedAt: new Date()
+        });
+      }
+
+      // También actualizar el item en el estado items
+      setItems(prev => prev.map(item =>
+        item.id === itemId
+          ? { ...item, price: parsedPrice }
+          : item
+      ));
+
+      showToast("Precio actualizado", 'success');
+    } catch (error) {
+      console.error("Error actualizando precio:", error);
+      showToast("Error al actualizar precio", 'error');
+    }
+  };
+
   // Funciones auxiliares
   const allLists = [...lists, ...sharedLists];
 
@@ -1097,6 +1210,21 @@ export function ShoppingList() {
     if (isCurrentListShared()) return true;
 
     return false;
+  };
+
+  const loadListFinalizedStatus = async (listId) => {
+    try {
+      const listDoc = await getDoc(doc(db, "lists", listId));
+      if (listDoc.exists()) {
+        const data = listDoc.data();
+        setIsListFinalized(prev => ({
+          ...prev,
+          [listId]: data.isFinalized || false
+        }));
+      }
+    } catch (error) {
+      console.error("Error cargando estado de finalización:", error);
+    }
   };
 
   // Verificar si la lista actual es compartida con el usuario
@@ -1259,6 +1387,8 @@ export function ShoppingList() {
     // Calcular categoryInfo dinámicamente basado en la categoría del item
     const categoryInfo = getCategoryInfo(item.category || "OTHER");
 
+    const itemPrice = item.price || itemPrices[item.id] || 0;
+
     return (
       <li className="elegant-item" style={{
         display: 'flex',
@@ -1327,6 +1457,24 @@ export function ShoppingList() {
                 </span>
               )}
             </span>
+
+            {/* MOSTRAR PRECIO - incluso si es 0 */}
+            {item.completed && (
+              (() => {
+                const itemPrice = item.price !== undefined && item.price !== null ? item.price : 0;
+                return (
+                  <span style={{
+                    fontSize: '14px',
+                    color: itemPrice === 0 ? '#6B7280' : '#10B981',
+                    marginLeft: '8px',
+                    fontWeight: '600',
+                    fontStyle: itemPrice === 0 ? 'italic' : 'normal'
+                  }}>
+                    ({itemPrice.toFixed(2)} €{itemPrice === 0 && ''})
+                  </span>
+                );
+              })()
+            )}
 
             {/* INFORMACIÓN DE QUIÉN AÑADIÓ Y QUIÉN COMPRÓ - SOLO EN LISTAS COMPARTIDAS */}
             {isSharedList && (
@@ -2856,7 +3004,264 @@ export function ShoppingList() {
                 </div>
               )}
 
-              {/* SELECT ORIGINAL - SIN MODIFICAR */}
+              {/* Modal de Precio */}
+              {priceDialogOpen && currentPriceItem && (
+                <div className="modal-overlay" style={{
+                  position: 'fixed',
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  backgroundColor: 'rgba(0, 0, 0, 0.6)',
+                  display: 'flex',
+                  justifyContent: 'center',
+                  alignItems: 'center',
+                  zIndex: 9999
+                }}>
+                  <div className="dialog-modal" style={{
+                    backgroundColor: 'white',
+                    borderRadius: '12px',
+                    boxShadow: '0 10px 30px rgba(0, 0, 0, 0.3)',
+                    width: '90%',
+                    maxWidth: '400px',
+                    maxHeight: '90vh',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    overflow: 'hidden'
+                  }}>
+                    <div className="dialog-header" style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      padding: '20px 24px 0',
+                      borderBottom: '1px solid #e5e7eb',
+                      marginBottom: 0,
+                      background: 'white'
+                    }}>
+                      <h3 style={{
+                        margin: 0,
+                        fontSize: '1.25rem',
+                        fontWeight: '600',
+                        color: '#1f2937'
+                      }}>
+                        Precio del Producto
+                      </h3>
+                      <button
+                        onClick={() => {
+                          setPriceDialogOpen(false);
+                          setCurrentPriceItem(null);
+                          if (window.priceDialogResolve) {
+                            window.priceDialogResolve(null);
+                            window.priceDialogResolve = null;
+                          }
+                        }}
+                        className="close-btn"
+                        style={{
+                          background: 'none',
+                          border: 'none',
+                          fontSize: '1.5rem',
+                          cursor: 'pointer',
+                          color: '#6b7280',
+                          padding: '4px',
+                          borderRadius: '4px',
+                          transition: 'all 0.2s',
+                          lineHeight: 1,
+                          width: '32px',
+                          height: '32px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center'
+                        }}
+                        onMouseEnter={(e) => {
+                          e.target.style.backgroundColor = '#f3f4f6';
+                          e.target.style.color = '#374151';
+                        }}
+                        onMouseLeave={(e) => {
+                          e.target.style.backgroundColor = 'transparent';
+                          e.target.style.color = '#6b7280';
+                        }}
+                      >
+                        ×
+                      </button>
+                    </div>
+
+                    <div className="dialog-content" style={{
+                      padding: '24px',
+                      flex: 1,
+                      overflowY: 'auto',
+                      background: 'white'
+                    }}>
+                      <p style={{
+                        color: "#1f2937",
+                        margin: '0 0 16px 0',
+                        fontSize: '16px',
+                        lineHeight: '1.5'
+                      }}>
+                        Introduce el precio para <strong>"{currentPriceItem.text}"</strong>:
+                      </p>
+
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <input
+                          type="number"
+                          value={priceInput}
+                          onChange={(e) => setPriceInput(e.target.value)}
+                          placeholder="0.00"
+                          step="0.01"
+                          min="0"
+                          className="elegant-input"
+                          style={{
+                            flex: 1,
+                            padding: '12px',
+                            border: '1px solid #d1d5db',
+                            borderRadius: '8px',
+                            fontSize: '16px',
+                            color: '#1f2937',
+                            outline: 'none'
+                          }}
+                          autoFocus
+                          onKeyPress={(e) => {
+                            if (e.key === 'Enter') {
+                              const resolve = window.priceDialogResolve;
+                              setPriceDialogOpen(false);
+                              setCurrentPriceItem(null);
+                              if (resolve) {
+                                resolve(priceInput || "0");
+                                window.priceDialogResolve = null;
+                              }
+                            }
+                          }}
+                        />
+                        <span style={{
+                          fontSize: '16px',
+                          fontWeight: '600',
+                          color: '#374151',
+                          minWidth: '30px'
+                        }}>
+                          €
+                        </span>
+                      </div>
+
+                      <div style={{
+                        marginTop: '12px',
+                        fontSize: '14px',
+                        color: '#6b7280'
+                      }}>
+                        <p>Deja vacío y presiona "Continuar sin precio" para establecer el precio a 0€.</p>
+                        <p style={{ marginTop: '4px', fontSize: '13px' }}>
+                          El símbolo € se mostrará siempre, incluso si el precio es 0.
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="dialog-buttons" style={{
+                      display: 'flex',
+                      gap: '12px',
+                      justifyContent: 'flex-end',
+                      padding: '0 24px 24px',
+                      flexWrap: 'wrap',
+                      background: 'white'
+                    }}>
+                      <button
+                        onClick={() => {
+                          const resolve = window.priceDialogResolve;
+                          setPriceDialogOpen(false);
+                          setCurrentPriceItem(null);
+                          if (resolve) {
+                            resolve(null);
+                            window.priceDialogResolve = null;
+                          }
+                        }}
+                        className="cancel-btn"
+                        style={{
+                          backgroundColor: '#f3f4f6',
+                          color: '#374151',
+                          border: '1px solid #d1d5db',
+                          padding: '10px 20px',
+                          borderRadius: '8px',
+                          cursor: 'pointer',
+                          fontWeight: '500',
+                          transition: 'all 0.2s',
+                          minWidth: '120px'
+                        }}
+                        onMouseEnter={(e) => {
+                          e.target.style.backgroundColor = '#e5e7eb';
+                          e.target.style.borderColor = '#9ca3af';
+                        }}
+                        onMouseLeave={(e) => {
+                          e.target.style.backgroundColor = '#f3f4f6';
+                          e.target.style.borderColor = '#d1d5db';
+                        }}
+                      >
+                        Cancelar
+                      </button>
+                      <button
+                        onClick={() => {
+                          const resolve = window.priceDialogResolve;
+                          setPriceDialogOpen(false);
+                          setCurrentPriceItem(null);
+                          if (resolve) {
+                            resolve(""); // Esto indica "continuar sin precio" (precio 0)
+                            window.priceDialogResolve = null;
+                          }
+                        }}
+                        className="blue-button"
+                        style={{
+                          backgroundColor: '#f59e0b',
+                          color: 'white',
+                          border: 'none',
+                          padding: '10px 20px',
+                          borderRadius: '8px',
+                          cursor: 'pointer',
+                          fontWeight: '500',
+                          transition: 'all 0.2s',
+                          minWidth: '180px'
+                        }}
+                        onMouseEnter={(e) => {
+                          e.target.style.backgroundColor = '#d97706';
+                        }}
+                        onMouseLeave={(e) => {
+                          e.target.style.backgroundColor = '#f59e0b';
+                        }}
+                      >
+                        Continuar sin precio (0€)
+                      </button>
+                      <button
+                        onClick={() => {
+                          const resolve = window.priceDialogResolve;
+                          setPriceDialogOpen(false);
+                          setCurrentPriceItem(null);
+                          if (resolve) {
+                            resolve(priceInput || "0"); // Si está vacío, usar 0
+                            window.priceDialogResolve = null;
+                          }
+                        }}
+                        className="blue-button"
+                        style={{
+                          backgroundColor: '#10B981',
+                          color: 'white',
+                          border: 'none',
+                          padding: '10px 20px',
+                          borderRadius: '8px',
+                          cursor: 'pointer',
+                          fontWeight: '500',
+                          transition: 'all 0.2s',
+                          minWidth: '100px'
+                        }}
+                        onMouseEnter={(e) => {
+                          e.target.style.backgroundColor = '#059669';
+                        }}
+                        onMouseLeave={(e) => {
+                          e.target.style.backgroundColor = '#10B981';
+                        }}
+                      >
+                        Aceptar
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+
               <select
                 value={currentList}
                 onChange={(e) => setCurrentList(e.target.value)}
@@ -3935,6 +4340,7 @@ export function ShoppingList() {
         </div>
       )}
 
+
       {finalizeDialogOpen && (
         <div className="modal-overlay" style={{
           position: 'fixed',
@@ -3995,14 +4401,6 @@ export function ShoppingList() {
                   alignItems: 'center',
                   justifyContent: 'center'
                 }}
-                onMouseEnter={(e) => {
-                  e.target.style.backgroundColor = '#f3f4f6';
-                  e.target.style.color = '#374151';
-                }}
-                onMouseLeave={(e) => {
-                  e.target.style.backgroundColor = 'transparent';
-                  e.target.style.color = '#6b7280';
-                }}
               >
                 ×
               </button>
@@ -4014,53 +4412,54 @@ export function ShoppingList() {
               overflowY: 'auto',
               background: 'white'
             }}>
-              <p style={{ color: 'black', marginBottom: '16px' }}>
-                Introduce el precio total de la compra:
-              </p>
-              <input
-                type="number"
-                step="0.01"
-                min="0"
-                value={purchaseInfo[currentList]?.totalPrice?.toString() || ""}
-                onChange={(e) => {
-                  const price = e.target.value;
-                  setPurchaseInfo(prev => ({
-                    ...prev,
-                    [currentList]: price ? {
-                      ...prev[currentList],
-                      totalPrice: parseFloat(price)
-                    } : null
-                  }));
-                }}
-                placeholder="Precio total (ej: 45.50)"
-                className="elegant-input"
-                style={{
-                  color: 'black',
-                  width: '100%',
-                  padding: '12px',
-                  border: '1px solid #d1d5db',
-                  borderRadius: '8px',
-                  fontSize: '16px'
-                }}
-              />
+              {/* Mostrar resumen de precios */}
+              <div style={{ marginBottom: '20px' }}>
+                <h4 style={{ color: '#1f2937', marginBottom: '12px' }}>Resumen de la compra</h4>
 
-              {purchaseInfo[currentList]?.totalPrice && (
-                <div style={{
-                  marginTop: '16px',
-                  padding: '12px',
-                  backgroundColor: '#f0f9ff',
-                  borderRadius: '8px',
-                  border: '1px solid #bae6fd'
-                }}>
-                  <p style={{
-                    color: '#0369a1',
-                    margin: 0,
-                    fontSize: '14px'
+                {/* Items con precios */}
+                {items.filter(item => item.completed).map(item => (
+                  <div key={item.id} style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    padding: '8px 0',
+                    borderBottom: '1px solid #f3f4f6'
                   }}>
-                    💡 El precio total se mostrará en la información de la lista y podrás usarlo para dividir gastos.
-                  </p>
+                    <span style={{ color: '#374151', fontSize: '14px' }}>
+                      {item.text}
+                    </span>
+                    <span style={{
+                      color: (itemPrices[item.id] || 0) === 0 ? '#6B7280' : '#10B981',
+                      fontWeight: '600',
+                      fontStyle: (itemPrices[item.id] || 0) === 0 ? 'italic' : 'normal'
+                    }}>
+                      {(itemPrices[item.id] || 0).toFixed(2)} €
+                      {(itemPrices[item.id] || 0) === 0 && ''}
+                    </span>
+                  </div>
+                ))}
+
+                {/* Total */}
+                <div style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  padding: '12px 0',
+                  borderTop: '2px solid #e5e7eb',
+                  marginTop: '8px'
+                }}>
+                  <strong style={{ color: '#1f2937', fontSize: '16px' }}>Total:</strong>
+                  <strong style={{ color: '#10B981', fontSize: '18px' }}>
+                    {items.filter(item => item.completed).reduce((sum, item) =>
+                      sum + (itemPrices[item.id] || 0), 0
+                    ).toFixed(2)} €
+                  </strong>
                 </div>
-              )}
+              </div>
+
+              <p style={{ color: 'black', marginBottom: '16px', fontSize: '14px' }}>
+                Al finalizar la compra, no se podrán modificar los productos ni sus precios.
+              </p>
             </div>
 
             <div className="dialog-buttons" style={{
@@ -4082,46 +4481,30 @@ export function ShoppingList() {
                   borderRadius: '8px',
                   cursor: 'pointer',
                   fontWeight: '500',
-                  transition: 'all 0.2s',
                   minWidth: '80px'
-                }}
-                onMouseEnter={(e) => {
-                  e.target.style.backgroundColor = '#e5e7eb';
-                  e.target.style.borderColor = '#9ca3af';
-                }}
-                onMouseLeave={(e) => {
-                  e.target.style.backgroundColor = '#f3f4f6';
-                  e.target.style.borderColor = '#d1d5db';
                 }}
               >
                 Cancelar
               </button>
               <button
                 onClick={() => {
-                  const price = purchaseInfo[currentList]?.totalPrice;
-                  finalizePurchase(currentList, price);
+                  finalizePurchase(currentList);
                   setFinalizeDialogOpen(false);
                 }}
+                disabled={items.filter(item => item.completed).length === 0}
                 className="blue-button"
                 style={{
-                  backgroundColor: '#3b82f6',
+                  backgroundColor: items.filter(item => item.completed).length === 0 ? '#9ca3af' : '#10B981',
                   color: 'white',
                   border: 'none',
                   padding: '10px 20px',
                   borderRadius: '8px',
-                  cursor: 'pointer',
+                  cursor: items.filter(item => item.completed).length === 0 ? 'not-allowed' : 'pointer',
                   fontWeight: '500',
-                  transition: 'all 0.2s',
                   minWidth: '100px'
                 }}
-                onMouseEnter={(e) => {
-                  e.target.style.backgroundColor = '#2563eb';
-                }}
-                onMouseLeave={(e) => {
-                  e.target.style.backgroundColor = '#3b82f6';
-                }}
               >
-                {purchaseInfo[currentList]?.totalPrice ? 'Guardar Precio' : 'Eliminar Precio'}
+                Finalizar Compra
               </button>
             </div>
           </div>
